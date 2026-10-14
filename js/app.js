@@ -1,18 +1,8 @@
-(function () {
+(async function () {
   'use strict';
-  // The page's own canonical markup, captured before anything is built or changed, so it can republish
-  // itself with new saved state. Only what sits between the atlas markers is kept — nothing the viewer injects.
-  const PRISTINE = (function () {
-    try {
-      const s = document.documentElement.outerHTML;
-      const a = s.indexOf('<!--atlas:start-->'); if (a < 0) return null;
-      const b = s.indexOf('<script id="atlas-app">', a); if (b < 0) return null;
-      const c = s.indexOf('<\/script>', b); if (c < 0) return null;
-      return s.slice(a, c + 9) + '\n<!--atlas:end-->\n';
-    } catch (_) { return null; }
-  })();
   let NA, WORLD; // loaded from ./data/na.json and ./data/world.json at startup
 
+  // terrain JPEGs; attached to the map only the first time the real map is shown
   const TERRAIN = {"world": "./terrain/world.jpg", "na": "./terrain/na.jpg", "insets": ["./terrain/inset-0.jpg", "./terrain/inset-1.jpg", "./terrain/inset-2.jpg", "./terrain/inset-3.jpg", "./terrain/inset-4.jpg", "./terrain/inset-5.jpg", "./terrain/inset-6.jpg"]};
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const $ = (s, r) => (r || document).querySelector(s);
@@ -38,7 +28,7 @@
   }
 
   // ---------- build maps ----------
-  const terrainImgs = []; // [image element, data uri] — href is attached the first time the real map is shown
+  const terrainImgs = []; // [image element, JPEG path] — href is attached the first time the real map is shown
   function terrain(parent, uri, attrs) {
     const img = el('image', Object.assign({ class: 'terrain', preserveAspectRatio: 'none' }, attrs), parent);
     terrainImgs.push([img, uri]);
@@ -106,6 +96,91 @@
     el('path', { class: 'sphere', d: WORLD.sphere, style: 'fill:none', 'pointer-events': 'none' }, svg);
     return svg;
   }
+
+
+  // ---------- app install & updates ----------
+  // Wired up before the map data loads so no browser event is missed.
+  const LS_SAFE = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
+  };
+  const isStandalone = () => {
+    try { if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true; } catch (_) {}
+    return window.navigator.standalone === true;
+  };
+
+  // Install button (Chromium browsers)
+  const installBtn = $('#install-btn');
+  let installPrompt = null;
+  function hideInstall() { installPrompt = null; installBtn.hidden = true; }
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    if (isStandalone()) return;
+    installPrompt = e; installBtn.hidden = false;
+  });
+  installBtn.addEventListener('click', () => {
+    const p = installPrompt; if (!p) return;
+    hideInstall();
+    try { p.prompt(); Promise.resolve(p.userChoice).catch(() => {}); } catch (_) {}
+  });
+  window.addEventListener('appinstalled', () => { hideInstall(); hideIosHint(false); });
+  try {
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const onMode = () => { if (mq.matches) { hideInstall(); hideIosHint(false); } };
+    if (mq.addEventListener) mq.addEventListener('change', onMode); else if (mq.addListener) mq.addListener(onMode);
+  } catch (_) {}
+
+  // One-time hint for iPhone / iPad Safari, which has no install prompt
+  const IOS_HINT_KEY = 'travel-atlas:ios-hint';
+  const iosHint = $('#ios-hint');
+  function hideIosHint(remember) { iosHint.hidden = true; if (remember) LS_SAFE.set(IOS_HINT_KEY, '1'); }
+  (function () {
+    const ua = navigator.userAgent || '';
+    const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const safari = /Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua);
+    if (ios && safari && !isStandalone() && LS_SAFE.get(IOS_HINT_KEY) !== '1') iosHint.hidden = false;
+  })();
+  $('#ios-hint-close').addEventListener('click', () => hideIosHint(true));
+
+  // Service worker: offline support, and a quiet notice when a new version is ready
+  const updateToast = $('#update-toast');
+  let waitingWorker = null, reloadRequested = false;
+  function showUpdate(worker) { waitingWorker = worker; updateToast.hidden = false; }
+  $('#update-reload').addEventListener('click', () => {
+    if (!waitingWorker) { location.reload(); return; }
+    reloadRequested = true;
+    try { waitingWorker.postMessage({ type: 'SKIP_WAITING' }); } catch (_) { location.reload(); }
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!reloadRequested) return;              // never refresh on our own
+      reloadRequested = false; location.reload();
+    });
+    const registerSW = () => {
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const w = reg.installing; if (!w) return;
+          w.addEventListener('statechange', () => {
+            if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(w);
+          });
+        });
+      }).catch(() => {});
+    };
+    if (document.readyState === 'complete') registerSW(); else window.addEventListener('load', registerSW);
+  }
+
+  // ---------- load map data ----------
+  const loadingEls = [...document.querySelectorAll('.frame-loading')];
+  try {
+    const get = url => fetch(url).then(r => { if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); });
+    [NA, WORLD] = await Promise.all([get('./data/na.json'), get('./data/world.json')]);
+  } catch (err) {
+    for (const n of loadingEls) { n.textContent = 'Couldn’t load the map. Check your connection and reload the page.'; n.classList.add('err'); }
+    $('#status').hidden = true;
+    return;
+  }
+  for (const n of loadingEls) n.remove();
 
   const svgNA = buildNA();
   const svgWorld = buildWorld();
@@ -379,24 +454,16 @@
   document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) results.hidden = true; });
 
   // ---------- persistence ----------
-  // Three layers: this browser (always, instant), the page itself (saved as a new version when the viewer can
-  // edit it — no reload when the host supports file saves, a quick reload otherwise), and a manual backup code.
-  const LS_KEY = 'travel-atlas:v1', LS_T = 'travel-atlas:t', OWNER_KEY = 'travel-atlas:owner', RESTORE_KEY = 'travel-atlas:restore';
-  const DATA_PATH = 'data/marks.json';
-  const statusEl = $('#status'), saveBtn = $('#save-btn'), owner = $('#owner');
+  // Marks live in this browser's storage on this device. Backup (code or file) carries them elsewhere.
+  const LS_KEY = 'travel-atlas:v1', LS_T = 'travel-atlas:t', OWNER_KEY = 'travel-atlas:owner';
+  const statusEl = $('#status'), owner = $('#owner');
   const STATUS = {
-    connecting: ['Checking…', ''],
-    local: ['Saved in this browser', 'Saving to the page isn’t available here, so marks stay in this browser.'],
-    readonly: ['View only · saved in this browser', 'You can look and mark, but this page can’t be saved by you. Ask its owner for edit access, or use Backup.'],
-    saved: ['Saved to the page', 'Your marks are part of this page now and follow you to any device.'],
-    unsaved: ['Unsaved changes', 'Will save in a moment.'],
-    saving: ['Saving…', ''],
-    error: ['Couldn’t save', 'Kept in this browser. Try Save now, or use Backup.'],
+    saved: ['Saved on this device', 'Your marks are kept in this browser on this device. Use Backup to move them to another phone or computer.'],
+    error: ['Can’t save here — use Backup', 'This browser isn’t letting the page store anything (private browsing or blocked site data), so marks will be lost when it closes. Copy a backup code or download a backup file.'],
   };
-  let status = 'connecting';
-  function setStatus(s) { status = s; statusEl.dataset.state = s; statusEl.textContent = STATUS[s][0]; statusEl.title = STATUS[s][1]; saveBtn.hidden = !(s === 'unsaved' || s === 'error'); }
+  function setStatus(s) { statusEl.dataset.state = s; statusEl.textContent = STATUS[s][0]; statusEl.title = STATUS[s][1]; }
 
-  let lastChange = 0;                       // ms timestamp of the newest state this view holds
+  let lastChange = 0;                       // ms timestamp of the newest change
   function readLocal() {
     try {
       const o = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
@@ -408,10 +475,22 @@
       const o = {}; for (const id of state) o[id] = true;
       localStorage.setItem(LS_KEY, JSON.stringify(o)); localStorage.setItem(LS_T, String(lastChange));
       const n = ownerName(); if (n) localStorage.setItem(OWNER_KEY, n); else localStorage.removeItem(OWNER_KEY);
-    } catch (_) {}
+      setStatus('saved');
+      return true;
+    } catch (_) { setStatus('error'); return false; }
   }
-  function readEmbedded() {
-    try { const o = JSON.parse($('#atlas-state').textContent || '{}'); return { v: (o.v || []).filter(id => places.has(id)), owner: String(o.owner || ''), t: +(o.t || 0) }; } catch (_) { return { v: [], owner: '', t: 0 }; }
+  // ask the browser not to evict our storage — once, after the first mark, best-effort
+  let persistAsked = false;
+  function askPersist() {
+    if (persistAsked || !state.size) return;
+    persistAsked = true;
+    try {
+      const s = navigator.storage;
+      if (s && typeof s.persist === 'function') {
+        Promise.resolve(typeof s.persisted === 'function' ? s.persisted() : false)
+          .then(already => already || s.persist()).catch(() => {});
+      }
+    } catch (_) {}
   }
   function applySnapshot(snap) {
     state.clear(); for (const id of snap.v) state.add(id);
@@ -419,94 +498,23 @@
     lastChange = snap.t || 0;
   }
 
-  // start from whichever copy is newest: this browser's cache, the state baked into the page, or the page's data file
-  const local = readLocal(), embedded = readEmbedded();
-  applySnapshot(local.t > embedded.t ? local : embedded);
-  paintAll();
-  restoreView();
-
   function ownerName() { return owner.textContent.replace(/\s+/g, ' ').trim().slice(0, 40); }
   function pageTitle() { const n = ownerName(); return n ? `${n}’s Travel Atlas` : 'Travel Atlas'; }
-  function snapshotJson() { return JSON.stringify({ v: [...state].sort(), owner: ownerName(), t: lastChange }); }
+  function syncTitle() { document.title = pageTitle(); }
 
-  // ----- the page as its own record -----
-  let art = null, canWrite = null, filesForm = null, saveTimer = 0, saving = false, dirty = false, acted = false;
-  const SKELETON = '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>';
-  function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-  function regenerate(json) {
-    if (!PRISTINE) return null;
-    let s = PRISTINE;
-    s = s.replace(/<script type="application\/json" id="atlas-state">[\s\S]*?<\/script>/, () => '<script type="application/json" id="atlas-state">' + json.replace(/</g, '\\u003c') + '<\/script>');
-    s = s.replace(/<title>[\s\S]*?<\/title>/, () => '<title>' + escapeHtml(pageTitle()) + '</title>');
-    return SKELETON + s + '</body></html>';
-  }
-  function stashView() {
-    try { sessionStorage.setItem(RESTORE_KEY, JSON.stringify({ t: Date.now(), y: window.scrollY, na: viewNA.svg.getAttribute('viewBox'), world: viewWorld.svg.getAttribute('viewBox') })); } catch (_) {}
-  }
-  function restoreView() {
-    try {
-      const r = JSON.parse(sessionStorage.getItem(RESTORE_KEY) || 'null'); sessionStorage.removeItem(RESTORE_KEY);
-      if (!r || Date.now() - r.t > 60000) return;
-      for (const [k, v] of [['na', viewNA], ['world', viewWorld]]) { const p = (r[k] || '').split(' ').map(Number); if (p.length === 4 && p.every(isFinite)) v.set(p[0], p[1], p[2]); }
-      requestAnimationFrame(() => window.scrollTo(0, r.y || 0));
-    } catch (_) {}
-  }
+  applySnapshot(readLocal());
+  paintAll();
+  syncTitle();
+  saveLocal();                              // also tells us whether this browser lets us save at all
+
   function markDirty() {
-    lastChange = Date.now(); dirty = true; acted = true; saveLocal();
-    if (canWrite === false || art === null && status === 'local') { setStatus(canWrite === false ? 'readonly' : 'local'); return; }
-    setStatus('unsaved');
-    clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 2500);
+    lastChange = Date.now();
+    if (saveLocal()) askPersist();
+    syncTitle();
   }
   function persist() { markDirty(); }
-  async function saveNow() {
-    clearTimeout(saveTimer);
-    if (!art || !dirty || saving) return;
-    saving = true; setStatus('saving');
-    const json = snapshotJson(), tAtSave = lastChange;
-    try {
-      if (filesForm !== false) {
-        try {
-          await art.publish({ [DATA_PATH]: { content: json, contentType: 'application/json' } });
-          filesForm = true;
-          if (lastChange === tAtSave) { dirty = false; setStatus('saved'); } else { setStatus('unsaved'); saveTimer = setTimeout(saveNow, 1500); }
-          saving = false; return;
-        } catch (e) {
-          if (!(e && (e.code === 'capability_disabled' || e.code === 'read_only_path' || e.code === 'invalid_content'))) throw e;
-          filesForm = false;                         // this host wants the whole page; fall through
-        }
-      }
-      const html = regenerate(json);
-      if (!html) throw { code: 'no_template' };
-      stashView();
-      await art.publish(html);                       // the shell reloads this view to the new version
-      dirty = false; setStatus('saved');
-    } catch (e) {
-      const code = e && e.code;
-      if (code === 'not_writer' || code === 'not_granted' || code === 'not_declared' || code === 'consent_required') { canWrite = false; setStatus('readonly'); }
-      else if (code === 'conflict') { stashView(); setStatus('saving'); }   // another device won; the shell is reloading us
-      else if (code === 'rate_limited') { setStatus('unsaved'); saveTimer = setTimeout(saveNow, 15000); }
-      else { setStatus('error'); }
-    } finally { saving = false; }
-  }
-  saveBtn.addEventListener('click', () => { dirty = true; saveNow(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && dirty && art && canWrite !== false) saveNow(); });
-
-  (async () => {
-    // the page's data file, if a file save has happened before, is the newest copy of record
-    let fileSnap = null, r = null;
-    try { r = await fetch(DATA_PATH, { cache: 'no-store' }); } catch (_) { filesForm = false; }
-    if (r && r.ok) { try { const o = await r.json(); if (o && Array.isArray(o.v)) fileSnap = { v: o.v.filter(id => places.has(id)), owner: String(o.owner || ''), t: +(o.t || 0) }; } catch (_) {} }
-    if (fileSnap && fileSnap.t > lastChange) { applySnapshot(fileSnap); paintAll(); saveLocal(); }
-
-    try { if (window.claude && typeof window.claude.use === 'function') art = await window.claude.use('artifact'); } catch (_) { art = null; }
-    if (!art) { setStatus('local'); return; }
-    canWrite = null;                                 // unknown until the first save answers
-    const savedT = Math.max(embedded.t, fileSnap ? fileSnap.t : 0);
-    if (lastChange > savedT) {                       // this browser is ahead of the page
-      dirty = true; setStatus('unsaved');
-      if (acted) { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 1500); }   // the viewer marked something while we were checking
-    } else setStatus('saved');
-  })();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveLocal(); });
+  window.addEventListener('pagehide', () => { saveLocal(); });
 
   // ---------- whose atlas ----------
   owner.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); owner.blur(); } });
@@ -517,6 +525,7 @@
 
   // ---------- backup & restore ----------
   const dlg = $('#backup'), codeOut = $('#code-out'), codeIn = $('#code-in'), copyNote = $('#copy-note'), restoreNote = $('#restore-note');
+  const fileIn = $('#restore-file-input');
   const CODE_PREFIX = 'atlas1:';
   function makeCode() { return CODE_PREFIX + [...state].sort().join(','); }
   function parseCode(s) {
@@ -528,6 +537,20 @@
     return { ids: known, unknown: ids.length - known.length };
   }
   function note(elm, text, cls) { elm.textContent = text; elm.className = elm.className.replace(/\b(ok|err)\b/g, '').trim() + (cls ? ' ' + cls : ''); }
+  // one restore path for both the pasted code and a backup file
+  function applyRestore(parsed, emptyMsg) {
+    if (!parsed) { note(restoreNote, emptyMsg, 'err'); return false; }
+    if (!parsed.ids.length) { note(restoreNote, 'That doesn’t look like a backup code from this page.', 'err'); return false; }
+    const replace = $('#restore-replace').checked;
+    if (replace) state.clear();
+    let added = 0;
+    for (const id of parsed.ids) { if (!state.has(id)) { state.add(id); added++; } }
+    paintAll(); markDirty();
+    codeOut.value = makeCode();
+    const extra = parsed.unknown ? ` (${parsed.unknown} unrecognized ${parsed.unknown === 1 ? 'entry' : 'entries'} skipped)` : '';
+    note(restoreNote, replace ? `Restored ${parsed.ids.length} ${parsed.ids.length === 1 ? 'place' : 'places'}${extra}.` : `Added ${added} new ${added === 1 ? 'place' : 'places'}${extra}.`, 'ok');
+    return true;
+  }
   $('#backup-btn').addEventListener('click', () => {
     codeOut.value = makeCode(); codeIn.value = ''; note(copyNote, ''); note(restoreNote, '');
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
@@ -539,18 +562,58 @@
     try { await navigator.clipboard.writeText(codeOut.value); ok = true; } catch (_) { try { ok = document.execCommand('copy'); } catch (_) {} }
     note(copyNote, ok ? 'Copied. Keep it somewhere safe.' : 'Couldn’t copy automatically — select the code and copy it yourself.', ok ? 'ok' : 'err');
   });
-  $('#restore-code').addEventListener('click', () => {
-    const parsed = parseCode(codeIn.value);
-    if (!parsed) { note(restoreNote, 'Paste a backup code first.', 'err'); return; }
-    if (!parsed.ids.length) { note(restoreNote, 'That doesn’t look like a backup code from this page.', 'err'); return; }
-    const replace = $('#restore-replace').checked;
-    if (replace) state.clear();
-    let added = 0;
-    for (const id of parsed.ids) { if (!state.has(id)) { state.add(id); added++; } }
-    paintAll(); markDirty();
-    codeOut.value = makeCode();
-    const extra = parsed.unknown ? ` (${parsed.unknown} unrecognized ${parsed.unknown === 1 ? 'entry' : 'entries'} skipped)` : '';
-    note(restoreNote, replace ? `Restored ${parsed.ids.length} ${parsed.ids.length === 1 ? 'place' : 'places'}${extra}.` : `Added ${added} new ${added === 1 ? 'place' : 'places'}${extra}.`, 'ok');
+  $('#restore-code').addEventListener('click', () => { applyRestore(parseCode(codeIn.value), 'Paste a backup code first.'); });
+
+  // download a backup file
+  $('#download-backup').addEventListener('click', () => {
+    const now = new Date(), pad = n => String(n).padStart(2, '0');
+    const name = `travel-atlas-backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.json`;
+    const data = { format: 'atlas1', owner: ownerName(), marks: [...state].sort(), savedAt: now.toISOString() };
+    try {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.hidden = true;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      note(copyNote, `Downloaded ${name}. Keep it somewhere safe.`, 'ok');
+    } catch (_) {
+      note(copyNote, 'Couldn’t download here — copy the code instead.', 'err');
+    }
+  });
+
+  // restore from a backup file: our JSON, or a text file holding an atlas1: code
+  function parseBackupFile(text) {
+    text = String(text || '').replace(/^﻿/, '').trim();
+    if (!text) return null;
+    if (text[0] === '{') {
+      try {
+        const o = JSON.parse(text);
+        const list = Array.isArray(o.marks) ? o.marks : Array.isArray(o.v) ? o.v : null;
+        if (list) {
+          const parsed = parseCode(list.map(String).join(',')) || { ids: [], unknown: 0 };
+          parsed.owner = typeof o.owner === 'string' ? o.owner : '';
+          return parsed;
+        }
+      } catch (_) {}
+    }
+    const at = text.indexOf(CODE_PREFIX);
+    return parseCode(at >= 0 ? text.slice(at) : text);
+  }
+  $('#restore-file').addEventListener('click', () => { fileIn.value = ''; fileIn.click(); });
+  fileIn.addEventListener('change', () => {
+    const f = fileIn.files && fileIn.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parsed = parseBackupFile(reader.result);
+      if (parsed && !parsed.ids.length) { note(restoreNote, 'That file doesn’t look like a Travel Atlas backup.', 'err'); return; }
+      const ok = applyRestore(parsed, 'That file is empty.');
+      if (ok && parsed.owner && !ownerName()) {
+        owner.textContent = parsed.owner.replace(/\s+/g, ' ').trim().slice(0, 40);
+        ownerWas = ownerName(); markDirty();
+      }
+    };
+    reader.onerror = () => note(restoreNote, 'Couldn’t read that file.', 'err');
+    reader.readAsText(f);
   });
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
 })();

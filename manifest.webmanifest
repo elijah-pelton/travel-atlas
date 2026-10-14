@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "Travel Atlas",
+  "short_name": "Atlas",
+  "description": "Mark the states, provinces and countries you've visited. Works offline; your marks stay on this device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef1f3",
+  "theme_color": "#1b2229",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

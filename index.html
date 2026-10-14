@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Travel Atlas</title>
+<meta name="description" content="Mark the states, provinces and countries you've been to. Saved on your device.">
+<meta name="theme-color" content="#eef1f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e151b" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Atlas">
+<link rel="stylesheet" href="./css/fonts.css">
 <link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
@@ -23,23 +35,26 @@
         <button type="button" data-style="flat" aria-pressed="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3" width="12" height="10" rx="1.5"/></svg>Flat colors</button>
         <button type="button" data-style="real" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2 12.5 5.5 6l2.5 4 2-2.5 4 5z"/><circle cx="11" cy="4.5" r="1.4"/></svg>Real map</button>
       </div>
-      <span class="status" id="status" data-state="connecting" title="">Checking…</span>
-      <button type="button" class="btn" id="save-btn" hidden>Save now</button>
+      <span class="status" id="status" data-state="connecting" title="">Loading…</span>
       <button type="button" class="btn" id="backup-btn">Backup</button>
+      <button type="button" class="btn" id="install-btn" hidden>Install</button>
     </div>
   </header>
+  <div class="ios-hint" id="ios-hint" role="note" hidden><span>To install: Share → Add to Home Screen.</span><button type="button" class="x" id="ios-hint-close" aria-label="Dismiss" title="Dismiss">×</button></div>
 
   <dialog id="backup" aria-labelledby="backup-title">
     <form method="dialog" class="dlg">
       <div class="dlg-head"><h2 id="backup-title">Backup &amp; restore</h2><button type="submit" class="x" aria-label="Close">×</button></div>
-      <p class="dlg-sub">Copy the code below to keep a backup of your marks, or to carry them to a device where saving to the page isn't available. Paste a code and press Restore to bring marks back.</p>
+      <p class="dlg-sub">Your marks live on this device. Copy the code or download a file to keep a backup or move your marks to another phone or computer. Paste a code and press Restore, or choose a backup file, to bring marks back.</p>
       <label class="dlg-label" for="code-out">Your backup code</label>
       <textarea id="code-out" readonly rows="3" spellcheck="false"></textarea>
-      <div class="dlg-row"><button type="button" class="btn primary" id="copy-code">Copy code</button><span class="dlg-note" id="copy-note"></span></div>
+      <div class="dlg-row"><button type="button" class="btn primary" id="copy-code">Copy code</button><button type="button" class="btn" id="download-backup">Download backup</button><span class="dlg-note" id="copy-note"></span></div>
       <label class="dlg-label" for="code-in">Restore from a code</label>
       <textarea id="code-in" rows="3" spellcheck="false" placeholder="Paste a backup code here"></textarea>
       <div class="dlg-row">
         <button type="button" class="btn primary" id="restore-code">Restore</button>
+        <button type="button" class="btn" id="restore-file">Restore from file</button>
+        <input type="file" id="restore-file-input" accept=".json,.txt,application/json,text/plain" hidden>
         <label class="dlg-check"><input type="checkbox" id="restore-replace"> Replace my current marks instead of adding to them</label>
       </div>
       <p class="dlg-note" id="restore-note"></p>
@@ -55,6 +70,7 @@
       <div class="stats" id="stats-na"></div>
     </div>
     <div class="frame" id="frame-na">
+      <div class="frame-loading" role="status">Loading maps…</div>
       <div class="zoom" data-for="na"></div>
       <div class="toast" id="toast-na"></div>
     </div>
@@ -71,6 +87,7 @@
       <div class="stats" id="stats-world"></div>
     </div>
     <div class="frame" id="frame-world">
+      <div class="frame-loading" role="status">Loading maps…</div>
       <div class="zoom" data-for="world"></div>
       <div class="toast" id="toast-world"></div>
     </div>
@@ -79,11 +96,13 @@
   </section>
 
   <footer>
-    <p>If you can edit this page, your marks are saved into it and follow you to any device. Otherwise they stay in this browser — use Backup to carry them elsewhere.</p>
+    <p>Your marks are saved on this device. Use Backup to move them to another phone or computer.</p>
     <p>Map data: Natural Earth 1:50m (public domain). Equal Earth projection for the world; Albers equal-area conic for North America. Country count follows the 193 UN members plus Vatican City, Kosovo, and Taiwan. Terrain: Natural Earth I shaded relief.</p>
+    <p><a href="https://github.com/elijah-pelton/travel-atlas">Source on GitHub</a></p>
   </footer>
 </div>
 <div class="tip" id="tip"></div>
+<div class="update-toast" id="update-toast" role="status" hidden><span>Update available ·</span><button type="button" class="btn" id="update-reload">Reload</button></div>
 <script src="./js/app.js"></script>
 </body>
 </html>

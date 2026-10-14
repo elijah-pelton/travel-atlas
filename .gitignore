@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+.playwright/
+.DS_Store
+*.log
+
+# Personal backups must never be committed
+/travel-atlas-backup-*.json
