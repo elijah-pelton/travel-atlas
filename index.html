@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Travel Atlas</title>
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <div>
+      <h1><span class="owner" id="owner" contenteditable="true" spellcheck="false" role="textbox" aria-label="Whose atlas this is" title="Click to put your name here"></span><span class="poss">’s</span> Travel Atlas</h1>
+      <p class="sub">Click a state, province, or country to mark it. Click again to clear it. Switch to the real map for terrain and names. Click the name above to make it yours.</p>
+    </div>
+    <div class="tools">
+      <div class="search">
+        <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.5 10.5 14 14"/></svg>
+        <input id="q" type="search" placeholder="Find a place… (e.g. Singapore)" autocomplete="off" aria-label="Find a place">
+        <ul class="results" id="results" hidden></ul>
+      </div>
+      <div class="seg" role="group" aria-label="Map style" id="style-seg">
+        <button type="button" data-style="flat" aria-pressed="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3" width="12" height="10" rx="1.5"/></svg>Flat colors</button>
+        <button type="button" data-style="real" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2 12.5 5.5 6l2.5 4 2-2.5 4 5z"/><circle cx="11" cy="4.5" r="1.4"/></svg>Real map</button>
+      </div>
+      <span class="status" id="status" data-state="connecting" title="">Checking…</span>
+      <button type="button" class="btn" id="save-btn" hidden>Save now</button>
+      <button type="button" class="btn" id="backup-btn">Backup</button>
+    </div>
+  </header>
+
+  <dialog id="backup" aria-labelledby="backup-title">
+    <form method="dialog" class="dlg">
+      <div class="dlg-head"><h2 id="backup-title">Backup &amp; restore</h2><button type="submit" class="x" aria-label="Close">×</button></div>
+      <p class="dlg-sub">Copy the code below to keep a backup of your marks, or to carry them to a device where saving to the page isn't available. Paste a code and press Restore to bring marks back.</p>
+      <label class="dlg-label" for="code-out">Your backup code</label>
+      <textarea id="code-out" readonly rows="3" spellcheck="false"></textarea>
+      <div class="dlg-row"><button type="button" class="btn primary" id="copy-code">Copy code</button><span class="dlg-note" id="copy-note"></span></div>
+      <label class="dlg-label" for="code-in">Restore from a code</label>
+      <textarea id="code-in" rows="3" spellcheck="false" placeholder="Paste a backup code here"></textarea>
+      <div class="dlg-row">
+        <button type="button" class="btn primary" id="restore-code">Restore</button>
+        <label class="dlg-check"><input type="checkbox" id="restore-replace"> Replace my current marks instead of adding to them</label>
+      </div>
+      <p class="dlg-note" id="restore-note"></p>
+    </form>
+  </dialog>
+
+  <section class="map-section" id="sec-na">
+    <div class="map-head">
+      <div>
+        <h2>United States &amp; Canada</h2>
+        <p class="hint">States, D.C., the five inhabited territories, and every Canadian province and territory.</p>
+      </div>
+      <div class="stats" id="stats-na"></div>
+    </div>
+    <div class="frame" id="frame-na">
+      <div class="zoom" data-for="na"></div>
+      <div class="toast" id="toast-na"></div>
+    </div>
+    <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
+    <div class="visited-list" id="list-na"></div>
+  </section>
+
+  <section class="map-section" id="sec-world">
+    <div class="map-head">
+      <div>
+        <h2>The World</h2>
+        <p class="hint">196 countries, plus territories and other places that show up on a map.</p>
+      </div>
+      <div class="stats" id="stats-world"></div>
+    </div>
+    <div class="frame" id="frame-world">
+      <div class="zoom" data-for="world"></div>
+      <div class="toast" id="toast-world"></div>
+    </div>
+    <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
+    <div class="visited-list" id="list-world"></div>
+  </section>
+
+  <footer>
+    <p>If you can edit this page, your marks are saved into it and follow you to any device. Otherwise they stay in this browser — use Backup to carry them elsewhere.</p>
+    <p>Map data: Natural Earth 1:50m (public domain). Equal Earth projection for the world; Albers equal-area conic for North America. Country count follows the 193 UN members plus Vatican City, Kosovo, and Taiwan. Terrain: Natural Earth I shaded relief.</p>
+  </footer>
+</div>
+<div class="tip" id="tip"></div>
+<script src="./js/app.js"></script>
+</body>
+</html>
