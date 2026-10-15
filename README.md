@@ -1,6 +1,6 @@
 # Travel Atlas
 
-Travel Atlas is a pair of maps for keeping track of where you have been and where you want to go. One map covers the United States and Canada. The other covers the world, with about 3,300 cities that appear as you zoom in. Tap a place to mark it; a switch on each map changes taps from "Been there" to "Want to go", and want places show up striped. Tap a name in the lists below a map to give it a rating from 1 to 5, the year you went and a short note. The Ratings map style colors the map by your stars.
+Travel Atlas is a pair of maps for keeping track of where you have been and where you want to go. One map covers the United States and Canada. The other covers the world. About 3,300 cities appear as you zoom in; U.S. and Canadian ones show on both maps. Tap a place to mark it; a switch on each map changes taps from "Been there" to "Want to go", and want places show up striped. Tap a name in the lists below a map to give it a rating from 1 to 5, the year you went and a short note. The Ratings map style colors the map by your stars.
 
 The Color button lets you pick the color for places you've been (amber, coral, rose, violet, blue, teal or green); each device remembers its own choice. It works offline after the first load and can be installed like an app on a phone or computer.
 
@@ -67,7 +67,7 @@ Open Backup in the page header.
 
 ## Cities
 
-City dots come from Natural Earth's 1:10m populated places, a public-domain dataset: national capitals, places of 100,000 people or more, and a few smaller well-known ones, about 3,300 in all. They show on the world map only, appear as you zoom in, and search finds all of them. Marking a city Been there also marks its country if it isn't marked yet; clearing a city leaves the country alone. The city file loads the first time you zoom in or search, and then stays cached for offline use.
+City dots come from Natural Earth's 1:10m populated places, a public-domain dataset: national capitals, places of 100,000 people or more, every U.S. state capital and Canadian provincial and territorial capital, the main towns of the U.S. territories, and a few smaller well-known ones, about 3,300 in all. They appear as you zoom in on either map, and search finds all of them. U.S. and Canadian cities show on both maps; on the U.S. & Canada map, Hawaii's and the territories' cities sit in their insets. Marking a city Been there also marks its country if it isn't marked yet, and a U.S. or Canadian city also marks its state, province or territory; clearing a city leaves them alone. Each map lists its own cities: the U.S. & Canada map groups them by state and province, the world map lists the rest. The city file loads the first time you zoom in or search, and then stays cached for offline use.
 
 To rebuild the city data (for example after a new Natural Earth release), from the repo root:
 
@@ -76,7 +76,7 @@ python3 tools/make-cities.py
 node tools/make-place-ids.mjs
 ```
 
-The first writes `data/cities.json` and `data/cities-ids.json` from the source pinned in `tools/cities-source.json` (it refuses a file whose checksum doesn't match). The second regenerates the server's list of allowed place IDs; the server drops any city it doesn't know, so skipping this step means new cities never sync.
+The first writes `data/cities.json` and `data/cities-ids.json` from the source pinned in `tools/cities-source.json` (it refuses a file whose checksum doesn't match). It also checks the U.S. & Canada map's projections against Natural Earth's 1:50m state and country outlines (pinned in the same file) and stops if they no longer line up; `python3 tools/make-cities.py --fit-na` prints a fresh fit, and `docs/plan-cities.md` §11 records the numbers. The second regenerates the server's list of allowed place IDs; the server drops any city it doesn't know, so skipping this step means new cities never sync.
 
 ## Updating
 

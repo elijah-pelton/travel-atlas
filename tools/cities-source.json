@@ -1,5 +1,5 @@
 {
-  "_comment": "Pinned source for tools/make-cities.py. The script refuses any file whose SHA-256 or size differs. To update: pick a new natural-earth-vector release tag, re-check LICENSE.md, then update every field here and rerun.",
+  "_comment": "Pinned source for tools/make-cities.py. The script refuses any file whose SHA-256 or size differs. To update: pick a new natural-earth-vector release tag, re-check LICENSE.md, then update every field here and rerun. The na_fit entries pin the outlines used only to check the U.S. & Canada map projection (same release, same rules).",
   "dataset": "Natural Earth 1:10m cultural vectors: populated places",
   "repo": "https://github.com/nvkelso/natural-earth-vector",
   "tag": "v5.1.2",
@@ -10,5 +10,25 @@
   "bytes": 19359003,
   "license": "Public domain. LICENSE.md at v5.1.2 opens with 'Everything here is public domain.' (verified 2026-10-14)",
   "fallback": "https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-populated-places/ (zip; .dbf only). Not wired into the script.",
-  "verified": "2026-10-14"
+  "verified": "2026-10-15",
+  "na_fit": [
+    {
+      "role": "admin1",
+      "dataset": "Natural Earth 1:50m cultural vectors: admin-1 states, provinces",
+      "path": "geojson/ne_50m_admin_1_states_provinces.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_admin_1_states_provinces.geojson",
+      "sha256": "69a0e06e640b2d505858ae1cb63034e4677f3000b35a98e16312932b98c426b9",
+      "bytes": 2325694,
+      "use": "main map (states, provinces, D.C.), Hawaii and D.C. insets"
+    },
+    {
+      "role": "admin0",
+      "dataset": "Natural Earth 1:50m cultural vectors: admin-0 countries",
+      "path": "geojson/ne_50m_admin_0_countries.geojson",
+      "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_50m_admin_0_countries.geojson",
+      "sha256": "3e458fc036ad0a66411f2c1e6cac49c5d7bfb81cb1123bc513b22511a2b7fdeb",
+      "bytes": 3083490,
+      "use": "territory insets (Puerto Rico, U.S. Virgin Is., Guam, N. Mariana Is., American Samoa)"
+    }
+  ]
 }

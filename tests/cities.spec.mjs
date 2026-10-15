@@ -1,5 +1,5 @@
 // Travel Atlas: cities layer, city search, counters and lists (js/cities.js; docs/plan-cities.md §6-§8,
-// §12 C4/C5; docs/plan-ux.md §2.5, §8 cities.spec).
+// §11 phase 2 (the U.S. & Canada map), §12 C4/C5; docs/plan-ux.md §2.5, §8 cities.spec).
 // Part 1 is Node-only (pure functions on the real data/cities.json). Part 2 drives the app in Chromium
 // against a local `wrangler dev` (BASE_URL=http://127.0.0.1:8801/ npx playwright test cities.spec.mjs).
 import { test, expect } from '@playwright/test';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = fs.readFileSync(path.join(here, '..', 'js', 'cities.js'), 'utf8');
 const DATA = JSON.parse(fs.readFileSync(path.join(here, '..', 'data', 'cities.json'), 'utf8'));
+const NA = JSON.parse(fs.readFileSync(path.join(here, '..', 'data', 'na.json'), 'utf8'));
 
 function loadModule() {
   const mod = { exports: {} };
@@ -20,6 +21,33 @@ const M = loadModule();
 const W = 1000, H = 487;
 const vbAt = (k, cx, cy) => { const w = W / k, h = w * H / W; return { x: cx - w / 2, y: cy - h / 2, w, h }; };
 const KYOTO = 'C-1159149967', KYIV = 'C-1159151495', TOKYO = 'C-1159151609';
+const AUSTIN = 'C-1159149261', HONOLULU = 'C-1159151221', SAN_JUAN = 'C-1159151181', DALLAS = 'C-1159151235';
+const MONTPELIER = 'C-1159124647', JUNEAU = 'C-1159150555', IQALUIT = 'C-1159150241', PIERRE = 'C-1159150501';
+
+// na.json geometry (absolute M/L/Z paths) for point-in-polygon checks
+function rings(d) {
+  return (d.match(/M[^MZ]*Z?/g) || []).map(part => (part.match(/-?[\d.]+,-?[\d.]+/g) || []).map(q => q.split(',').map(Number)));
+}
+function inside(d, x, y) {
+  let c = false;
+  for (const r of rings(d)) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i], [xj, yj] = r[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function distTo(d, x, y) {
+  let best = Infinity;
+  for (const r of rings(d)) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [ax, ay] = r[j], [bx, by] = r[i], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)) : 0;
+    best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+  }
+  return best;
+}
+const NA_SHAPES = new Map();
+NA.places.forEach(p => NA_SHAPES.set(p.id, { d: p.d, inset: -1 }));
+NA.insets.forEach((ins, k) => ins.places.forEach(p => { if (p.id !== 'US-DC') NA_SHAPES.set(p.id, { d: p.d, inset: k }); }));
 
 // ======================================================================================
 // Part 1: pure
@@ -28,9 +56,10 @@ test.describe('pure', () => {
   const C = M.parse(DATA);
   const idx = id => C.byId.get(id);
 
-  test('p1 parse: 3,309 rows, C- ids, admin-1 names, capitals per country', () => {
+  test('p1 parse: 3,320 rows, C- ids, admin-1 names, capitals per country', () => {
     expect(C.n).toBe(DATA.c.length);
-    expect(C.n).toBe(3309);
+    expect(C.n).toBe(3320);
+    expect(DATA.v).toBe(2);
     expect(C.id[idx(KYOTO)]).toBe(KYOTO);
     expect(C.name[idx(KYOTO)]).toBe('Kyoto');
     expect(C.cc[idx(KYOTO)]).toBe('JPN');
@@ -166,6 +195,61 @@ test.describe('pure', () => {
     const been = [idx(KYOTO), idx(TOKYO), idx(KYIV)];
     const t = M.tally(C, been, [idx('C-1159151621')]);
     expect(t).toEqual({ been: 3, want: 1, countries: 2, capitals: 2 });
+    // NA tile: only U.S./Canadian cities count, regions = distinct states/provinces
+    expect(M.naTally(C, [idx(KYOTO), idx(AUSTIN), idx(DALLAS), idx(MONTPELIER)], [idx(HONOLULU), idx(TOKYO)]))
+      .toEqual({ been: 3, want: 1, regions: 2 });
+  });
+
+  test('p9 NA data: every U.S./Canadian/territory city has an NA position inside its own state polygon', () => {
+    const NA_CC = new Set(['USA', 'CAN', 'PRI', 'VIR', 'GUM', 'MNP', 'ASM']);
+    let n = 0, ok = 0;
+    for (let i = 0; i < C.n; i++) {
+      expect(!!C.na[i], C.name[i]).toBe(NA_CC.has(C.cc[i]));
+      if (!C.na[i]) continue;
+      n++;
+      const sh = NA_SHAPES.get(C.st[i]);
+      expect(sh, `${C.name[i]} ${C.st[i]}`).toBeTruthy();
+      expect(C.ins[i], C.name[i]).toBe(sh.inset);
+      if (inside(sh.d, C.nx[i], C.ny[i]) || distTo(sh.d, C.nx[i], C.ny[i]) <= 2) ok++;
+      if (C.ins[i] >= 0) {                          // drawn inside its inset's box
+        const b = NA.insets[C.ins[i]];
+        expect(C.nx[i] > b.x && C.nx[i] < b.x + b.w && C.ny[i] > b.y && C.ny[i] < b.y + b.h, C.name[i]).toBe(true);
+      } else expect(C.ny[i], C.name[i]).toBeLessThan(NA.mainH);
+    }
+    console.log(`[cities] NA: ${n} cities, ${ok} inside or within 2 units of their own polygon`);
+    expect(n).toBeGreaterThan(370);
+    expect(ok / n).toBeGreaterThanOrEqual(0.98);
+    // Austin is inside Texas; Honolulu in the Hawaii inset; San Juan in Puerto Rico's
+    const a = idx(AUSTIN);
+    expect(C.st[a]).toBe('US-TX');
+    expect(inside(NA_SHAPES.get('US-TX').d, C.nx[a], C.ny[a])).toBe(true);
+    expect(NA.insets[C.ins[idx(HONOLULU)]].label).toBe('Hawaii');
+    expect(inside(NA_SHAPES.get('US-HI').d, C.nx[idx(HONOLULU)], C.ny[idx(HONOLULU)])).toBe(true);
+    expect(NA.insets[C.ins[idx(SAN_JUAN)]].label).toBe('Puerto Rico');
+    expect(C.st[idx(SAN_JUAN)]).toBe('US-PRI');
+    // the small capitals the phase-2 rule adds
+    for (const [id, st] of [[MONTPELIER, 'US-VT'], [JUNEAU, 'US-AK'], [IQALUIT, 'CA-NU'], [PIERRE, 'US-SD']]) {
+      expect(idx(id), id).toBeGreaterThanOrEqual(0);
+      expect(C.st[idx(id)]).toBe(st);
+      expect(C.flags[idx(id)]).toBe(1);
+    }
+    // every state, province and territory on the map has at least one city
+    const have = new Set(); for (let i = 0; i < C.n; i++) if (C.na[i]) have.add(C.st[i]);
+    for (const id of NA_SHAPES.keys()) expect(have.has(id), id).toBe(true);
+    // and every one has its capital (flag >= 1) except D.C. (Washington is a national capital, flag 2)
+    const caps = new Set(); for (let i = 0; i < C.n; i++) if (C.na[i] && C.flags[i] >= 1) caps.add(C.st[i]);
+    for (const id of NA_SHAPES.keys()) if (id !== 'US-VIR') expect(caps.has(id), `capital of ${id}`).toBe(true);
+  });
+
+  test('p10 NA tiers: z <= k * frameWidth / 360 on the NA map, <= 600 nodes', () => {
+    const NV = C.naView, NW = 1000, NH = NA.h;
+    for (const [fw, k, cx, cy] of [[343, 1, 500, 503], [1200, 1, 500, 503], [1200, 3, 700, 600], [1200, 10, 820, 560], [343, 10, 98, 932]]) {
+      const w = NW / k, vb = { x: cx - w / 2, y: cy - w * NH / NW / 2, w, h: w * NH / NW };
+      const out = M.select(NV, vb, fw / w, NW, [], 600, 1);
+      expect(out.length).toBeLessThanOrEqual(600);
+      for (const j of out) expect(NV.z[j]).toBeLessThanOrEqual(k * fw / 360 + 1e-6);
+      for (const j of out) expect(C.na[NV.ci[j]]).toBe(1);
+    }
   });
 });
 
@@ -197,6 +281,30 @@ const status = (page, id) => page.evaluate(id => { const s = window.Atlas.getSta
 const domCount = page => page.evaluate(() => document.querySelectorAll('svg.map[data-map="world"] g.cities circle.city').length);
 async function scrollToWorld(page) {
   await page.evaluate(() => document.getElementById('frame-world').scrollIntoView({ block: 'center' }));
+}
+async function scrollToNA(page) {
+  await page.evaluate(() => document.getElementById('frame-na').scrollIntoView({ block: 'center' }));
+}
+async function setNaView(page, k, cx, cy) {
+  await page.evaluate(([k, cx, cy]) => {
+    const v = window.Atlas.views.na, w = v.W / k, h = w * v.H / v.W;
+    v.set(cx - w / 2, cy - h / 2, w);
+  }, [k, cx, cy]);
+}
+const naCount = page => page.evaluate(() => document.querySelectorAll('svg.map[data-map="na"] g.cities circle.city').length);
+// a client point (<= 10 px off the dot) where `id` is the nearest visible city on `map`
+async function nearestTap(page, id, map) {
+  const p = await page.evaluate(([id, map]) => {
+    const q = window.AtlasCities.screenOf(id, map);
+    if (q && (q.y < 40 || q.y > innerHeight - 40)) window.scrollBy(0, q.y - innerHeight / 2);   // tall NA frame
+    return window.AtlasCities.screenOf(id, map);
+  }, [id, map]);
+  if (!p) return null;
+  for (const [dx, dy] of [[0, 0], [0, -6], [6, -6], [-6, -6], [0, -9]]) {
+    const got = await page.evaluate(([x, y, map]) => window.AtlasCities.hit(x, y, map), [p.x + dx, p.y + dy, map]);
+    if (got === id) return { x: p.x + dx, y: p.y + dy };
+  }
+  return null;
 }
 
 test.describe('app', () => {
@@ -485,5 +593,205 @@ test.describe('app', () => {
       if (r.labelMax > 8) console.warn(`[cities perf] WARN ${label}: label relayout ${r.labelMax.toFixed(2)} ms > 8 ms`);
     }
     fs.writeFileSync(testInfo.outputPath('cities-perf.json'), JSON.stringify(runs, null, 2));
+  });
+
+  // ---------------- U.S. & Canada map (phase 2) ----------------
+  test('n1 NA map: zoom k>=2 loads cities; layer above the inset tray; <= 600 nodes at k = 1, 3, 10', async ({ page }) => {
+    const reqs = [];
+    page.on('request', r => { if (CITY_RE.test(r.url())) reqs.push(r.url()); });
+    await openApp(page);
+    await scrollToNA(page);
+    await page.waitForTimeout(500);
+    expect(reqs).toEqual([]);
+    await page.click('.zoom[data-for="na"] [data-z="in"]');
+    await page.click('.zoom[data-for="na"] [data-z="in"]');            // k = 2.89
+    await page.waitForFunction(() => window.AtlasCities.loaded);
+    expect(reqs.length).toBe(1);
+    await expect.poll(() => naCount(page)).toBeGreaterThan(0);
+    // the layer is the last thing drawn on the NA map, so inset cities sit above the tray
+    const last = await page.evaluate(() => { const svg = document.querySelector('svg.map[data-map="na"]'); const c = svg.querySelector('g.cities'); return svg.lastElementChild.contains(c); });
+    expect(last).toBe(true);
+    for (const k of [1, 3, 10]) {
+      await setNaView(page, k, 700, 600);
+      const n = await naCount(page);
+      expect(n, `k=${k}`).toBeLessThanOrEqual(600);
+      expect(n).toBe(await page.evaluate(() => window.AtlasCities.count('na')));
+      console.log(`[cities] NA desktop k=${k}: ${n} nodes, ${await page.evaluate(() => window.AtlasCities.labels('na'))} labels`);
+    }
+    await setNaView(page, 3, 600, 760);
+    await expect(page.locator(`svg.map[data-map="na"] circle.city[data-id="${AUSTIN}"]`)).toHaveCount(1);
+    // the NA dot sits where the data says (map units), and Austin is inside Texas on screen too
+    const pos = await page.evaluate(id => { const c = document.querySelector(`svg.map[data-map="na"] circle.city[data-id="${id}"]`); return [+c.getAttribute('cx'), +c.getAttribute('cy')]; }, AUSTIN);
+    expect(inside(NA_SHAPES.get('US-TX').d, pos[0], pos[1])).toBe(true);
+    const under = await page.evaluate(id => {
+      let p = window.AtlasCities.screenOf(id, 'na');
+      window.scrollBy(0, p.y - innerHeight / 2);
+      p = window.AtlasCities.screenOf(id, 'na');
+      const pl = document.elementsFromPoint(p.x, p.y).find(e => e.classList && e.classList.contains('place'));
+      return pl && pl.dataset.id;
+    }, AUSTIN);
+    expect(under).toBe('US-TX');
+  });
+
+  test('n2 tapping a city on the NA map marks it, its state and (if unmarked) its country', async ({ page }) => {
+    await openApp(page);
+    await loadCities(page);
+    await scrollToNA(page);
+    await setNaView(page, 4, 575.5, 784.2);
+    const tap = await nearestTap(page, AUSTIN, 'na');
+    expect(tap, 'an offset where Austin is nearest').not.toBe(null);
+    expect(await status(page, 'US-TX')).toBe(0);
+    await page.mouse.click(tap.x, tap.y);
+    expect(await status(page, AUSTIN)).toBe(1);
+    expect(await status(page, 'US-TX')).toBe(1);
+    expect(await status(page, 'USA')).toBe(1);
+    await expect(page.locator('#toast-na')).toContainText('Austin, Texas and United States: been there');
+    await expect(page.locator(`svg.map[data-map="na"] circle.city[data-id="${AUSTIN}"]`)).toHaveClass(/\bon\b/);
+    // NA tile + list grouped by state; the World list does not repeat U.S./Canadian cities
+    const tile = page.locator('#stats-na .stat.city-stat');
+    await expect(tile.locator('.n')).toHaveText('1');
+    await expect(tile).toContainText('in 1 state or province');
+    const list = page.locator('#list-cities-na');
+    await expect(list).toContainText('Cities (1):');
+    await expect(list.locator('.city-group .grp')).toHaveText('Texas:');
+    await expect(list.locator('button.chip')).toHaveText(/Austin/);
+    await expect(page.locator('#list-cities')).toBeHidden();
+    await expect(page.locator('#stats-world .stat.city-stat .n')).toHaveText('1');   // the World tile counts every city
+    await expect(page.locator('#list-na .lead').first()).toHaveText('Been there (1):'); // core list: Texas (USA is a World place)
+    // tap again clears Austin, keeps Texas and the U.S.
+    await page.waitForTimeout(400);
+    await page.mouse.click(tap.x, tap.y);
+    expect(await status(page, AUSTIN)).toBe(0);
+    expect(await status(page, 'US-TX')).toBe(1);
+    expect(await status(page, 'USA')).toBe(1);
+    await expect(page.locator('#toast-na')).toContainText('Austin: cleared');
+    await expect(list).toBeHidden();
+    // with the country already marked, the toast names the state only
+    await page.waitForTimeout(400);
+    await page.evaluate(() => window.Atlas.setStatus('US-TX', 0, { quiet: true }));
+    await page.mouse.click(tap.x, tap.y);
+    await expect(page.locator('#toast-na')).toContainText('Austin and Texas: been there');
+  });
+
+  test('n3 inset cities: Honolulu in the Hawaii inset, San Juan in Puerto Rico; tapping marks the territory', async ({ page }) => {
+    await openApp(page);
+    await loadCities(page);
+    await scrollToNA(page);
+    for (const [id, label] of [[HONOLULU, 'Hawaii'], [SAN_JUAN, 'Puerto Rico']]) {
+      const ins = NA.insets.find(b => b.label === label);
+      await setNaView(page, 3, ins.x + ins.w / 2, ins.y + ins.h / 2);
+      const c = page.locator(`svg.map[data-map="na"] circle.city[data-id="${id}"]`);
+      await expect(c).toHaveCount(1);
+      const [cx, cy] = await c.evaluate(n => [+n.getAttribute('cx'), +n.getAttribute('cy')]);
+      expect(cx > ins.x && cx < ins.x + ins.w && cy > ins.y && cy < ins.y + ins.h, `${label}: ${cx},${cy}`).toBe(true);
+      // drawn above the inset background: the topmost element at the dot is the city
+      const top = await page.evaluate(id => { let p = window.AtlasCities.screenOf(id, 'na'); window.scrollBy(0, p.y - innerHeight / 2); p = window.AtlasCities.screenOf(id, 'na'); const e = document.elementFromPoint(p.x, p.y); return e && e.getAttribute('data-id'); }, id);
+      expect(top).toBe(id);
+    }
+    const tap = await nearestTap(page, SAN_JUAN, 'na');
+    await page.mouse.click(tap.x, tap.y);
+    expect(await status(page, SAN_JUAN)).toBe(1);
+    expect(await status(page, 'US-PRI')).toBe(1);
+    expect(await status(page, 'PRI')).toBe(1);
+    await expect(page.locator('#toast-na')).toContainText('San Juan and Puerto Rico: been there');
+    await expect(page.locator('#list-cities-na .city-group .grp')).toHaveText('Puerto Rico:');
+  });
+
+  test('n4 small capitals are searchable: Montpelier, Juneau, Iqaluit', async ({ page }) => {
+    await openApp(page);
+    await page.focus('#q');
+    await page.waitForFunction(() => window.AtlasCities.loaded);
+    for (const [q, id, where] of [['montpelier', MONTPELIER, 'Vermont'], ['juneau', JUNEAU, 'Alaska'], ['iqaluit', IQALUIT, 'Nunavut']]) {
+      await page.fill('#q', q);
+      await expect(page.locator(`#results li[data-id="${id}"]`)).toContainText(where);
+      expect(await page.evaluate(id => window.AtlasCities.get(id).map, id)).toBe('na');
+    }
+  });
+
+  test('n5 search "austin" flies to the NA map, marks it and its state', async ({ page }) => {
+    await openApp(page);
+    await page.focus('#q');
+    await page.waitForFunction(() => window.AtlasCities.loaded);
+    await page.fill('#q', 'austin');
+    const li = page.locator(`#results li[data-id="${AUSTIN}"]`);
+    await expect(li).toBeVisible();
+    await li.click();
+    expect(await status(page, AUSTIN)).toBe(1);
+    expect(await status(page, 'US-TX')).toBe(1);
+    const k = await page.evaluate(() => window.Atlas.views.na.k);
+    expect(k).toBeGreaterThanOrEqual(4 - 1e-6);
+    expect(await page.evaluate(() => window.Atlas.views.world.k)).toBeLessThan(1.01);    // the World map stays put
+    const c = await page.evaluate(id => { const p = window.AtlasCities.screenOf(id, 'na'), r = window.Atlas.views.na.svg.getBoundingClientRect(); return { dx: p.x - (r.left + r.width / 2), dy: p.y - (r.top + r.height / 2) }; }, AUSTIN);
+    expect(Math.abs(c.dx)).toBeLessThan(4);
+    expect(Math.abs(c.dy)).toBeLessThan(4);
+    await expect(page.locator(`svg.map[data-map="na"] circle.city[data-id="${AUSTIN}"]`)).toHaveClass(/\bon\b/);
+    await expect(page.locator('#toast-na')).toContainText('Austin');
+  });
+
+  test('n6 lists: World lists non-U.S./Canadian cities, NA lists U.S./Canadian ones grouped by state/province', async ({ page }) => {
+    await openApp(page);
+    await page.evaluate(ids => { for (const [id, s] of ids) window.Atlas.setStatus(id, s, { quiet: true }); },
+      [[KYOTO, 1], [AUSTIN, 1], [DALLAS, 2], [MONTPELIER, 1], [IQALUIT, 1]]);
+    await page.waitForFunction(() => window.AtlasCities.loaded);
+    const world = page.locator('#list-cities');
+    await expect(world).toContainText('Cities (1):');
+    await expect(world).toContainText('Kyoto');
+    await expect(world).not.toContainText('Austin');
+    const na = page.locator('#list-cities-na');
+    await expect(na).toContainText('Cities (4):');
+    expect(await na.locator('.city-group .grp').allTextContents()).toEqual(['Nunavut:', 'Texas:', 'Vermont:']);
+    await expect(na.locator('.city-group[data-group="US-TX"] button.chip')).toHaveText(['Austin', 'Dallas']);
+    await expect(na.locator('.city-group[data-group="US-TX"] button.chip.want')).toHaveText('Dallas');
+    const tile = page.locator('#stats-na .stat.city-stat');
+    await expect(tile.locator('.n')).toHaveText('3');
+    await expect(tile).toContainText('in 3 states and provinces');
+    await expect(tile).toContainText('+1 want to go');
+    await expect(page.locator('#stats-world .stat.city-stat .n')).toHaveText('4');
+    // marked U.S. cities show on both maps at k = 1
+    await expect(page.locator(`svg.map[data-map="na"] circle.city[data-id="${AUSTIN}"]`)).toHaveClass(/\bon\b/);
+    await expect(page.locator(`svg.map[data-map="world"] circle.city[data-id="${AUSTIN}"]`)).toHaveClass(/\bon\b/);
+  });
+
+  test('n7 NA pan frame budget with 4x CPU throttle (reported)', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+    await openApp(page);
+    await loadCities(page);
+    await scrollToNA(page);
+    const cdp = await page.context().newCDPSession(page);
+    const runs = {};
+    for (const [label, k, cx, cy] of [['na-k2', 2, 650, 600], ['na-east-k4', 4, 780, 600], ['na-k10', 10, 820, 560]]) {
+      await setNaView(page, k, cx, cy);
+      await page.waitForTimeout(300);
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      await page.evaluate(() => {
+        const s = window.AtlasCities.stats.na; s.ms.length = 0; s.labelMs.length = 0;
+        window.__frames = []; let last = performance.now();
+        window.__raf = true;
+        const tick = t => { window.__frames.push(t - last); last = t; if (window.__raf) requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+      });
+      const box = await page.locator('#frame-na svg.map').boundingBox();
+      const x0 = box.x + box.width * 0.7, y0 = box.y + box.height * 0.4;
+      await page.mouse.move(x0, y0);
+      await page.mouse.down();
+      for (let i = 1; i <= 60; i++) await page.mouse.move(x0 - i * 8, y0 + Math.sin(i / 6) * 20);
+      await page.mouse.up();
+      await page.waitForTimeout(600);
+      const r = await page.evaluate(() => {
+        window.__raf = false;
+        const q = (a, p) => { if (!a.length) return 0; const b = [...a].sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.floor(p * b.length))]; };
+        const s = window.AtlasCities.stats.na, f = window.__frames.slice(2);
+        return { updates: s.ms.length, updP50: q(s.ms, 0.5), updP95: q(s.ms, 0.95), updMax: Math.max(0, ...s.ms), labelMax: Math.max(0, ...s.labelMs), frameP50: q(f, 0.5), frameP95: q(f, 0.95), nodes: window.AtlasCities.count('na'), labels: window.AtlasCities.labels('na') };
+      });
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+      runs[label] = r;
+      const line = `[cities perf 4x] ${label}: ${r.nodes} nodes, ${r.labels} labels; cities update p50 ${r.updP50.toFixed(2)} ms, p95 ${r.updP95.toFixed(2)} ms, max ${r.updMax.toFixed(2)} ms (${r.updates} updates); label relayout max ${r.labelMax.toFixed(2)} ms; rAF frame p50 ${r.frameP50.toFixed(1)} ms, p95 ${r.frameP95.toFixed(1)} ms`;
+      console.log(line);
+      testInfo.annotations.push({ type: 'perf', description: line });
+      expect(r.nodes).toBeLessThanOrEqual(600);
+      if (r.updP95 > 4) console.warn(`[cities perf] WARN ${label}: update p95 ${r.updP95.toFixed(2)} ms > 4 ms budget`);
+      if (r.labelMax > 8) console.warn(`[cities perf] WARN ${label}: label relayout ${r.labelMax.toFixed(2)} ms > 8 ms`);
+    }
+    fs.writeFileSync(testInfo.outputPath('cities-perf-na.json'), JSON.stringify(runs, null, 2));
   });
 });

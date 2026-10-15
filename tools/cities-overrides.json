@@ -1,5 +1,5 @@
 {
-  "_comment": "Pinned country assignments, keyed by Natural Earth NE_ID; 'w' is the world.json id the city gets, 'name' must match the source NAME, 'why' says why. Our map's polygons decide disputed areas (Crimea, Western Sahara, Kosovo, Somaliland, N. Cyprus follow world.json with no pin). Pins here fix cases where the point-in-polygon answer is wrong only because world.json borders are generalised (1:50m, 0.1-unit precision), plus a few reviewed special cases. make-cities.py prints every remaining polygon-vs-ADM0_A3 disagreement; review new ones and pin them here.",
+  "_comment": "Pinned country assignments, keyed by Natural Earth NE_ID; 'w' is the world.json id the city gets, 'name' must match the source NAME, 'why' says why. Our map's polygons decide disputed areas (Crimea, Western Sahara, Kosovo, Somaliland, N. Cyprus follow world.json with no pin). Pins here fix cases where the point-in-polygon answer is wrong only because world.json borders are generalised (1:50m, 0.1-unit precision), plus a few reviewed special cases. make-cities.py prints every remaining polygon-vs-ADM0_A3 disagreement; review new ones and pin them here. Phase 2 (U.S. & Canada map): 'na' pins the state/province id a city gets on the NA map (same review rule: make-cities.py prints every polygon-vs-ADM1NAME disagreement); an entry may carry 'w', 'na' or both.",
   "1159151107": {
     "name": "Posadas",
     "w": "ARG",
@@ -63,7 +63,8 @@
   "1159149193": {
     "name": "International Falls",
     "w": "USA",
-    "why": "border artifact: NE point is in USA; our 1:50m border at 0.1-unit precision is 0.18 units off, so the dot lands in CAN"
+    "why": "border artifact: NE point is in USA; our 1:50m border at 0.1-unit precision is 0.18 units off, so the dot lands in CAN; on the NA map the dot lands in CA-ON for the same reason (0.1-unit border precision), so it is pinned to US-MN",
+    "na": "US-MN"
   },
   "1159133601": {
     "name": "Niagara Falls",
@@ -99,5 +100,15 @@
     "name": "Gibraltar",
     "w": "GBR",
     "why": "British overseas territory with no polygon in world.json; nearest polygon is ESP. Pinned to GBR (sovereign). Lead to confirm"
+  },
+  "1159147661": {
+    "name": "Windsor",
+    "na": "CA-ON",
+    "why": "NA border artifact: NE point is in Ontario on the Detroit River; the generalised 1:50m border puts the dot in US-MI"
+  },
+  "1159149265": {
+    "name": "El Paso",
+    "na": "US-TX",
+    "why": "NA border artifact: NE point is in Texas at the New Mexico corner; the generalised 1:50m border puts the dot in US-NM"
   }
 }

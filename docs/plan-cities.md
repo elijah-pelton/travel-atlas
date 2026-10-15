@@ -3,7 +3,7 @@
 Scope: city data, IDs, pipeline, drawing, hit-testing, search, attribution. UI layout, want-to-go, notes/ratings: docs/plan-ux.md. Sync/backup: docs/plan-data-sync.md.
 
 ## Lead decisions (approved; override anything below that conflicts)
-- v1 shows cities on the **World map only** (Equal Earth). The NA map's Albers parameters were never recorded; NA cities are phase 2. US/Canadian cities still appear on the World map and in search, labelled with state/province.
+- v1 shows cities on the **World map only** (Equal Earth). The NA map's Albers parameters were never recorded; NA cities are phase 2. US/Canadian cities still appear on the World map and in search, labelled with state/province. **Phase 2 done (2026-10-15), see §11:** US/Canadian/US-territory cities now also show on the NA map.
 - **No separate Cities mode/view.** Cities are a layer on the World map (per plan-ux §2.5). Tap rule: if a visible city is within **12 CSS px** of a tap (nearest wins), the tap marks that city; otherwise the tap goes to the country exactly as today. Drag/pinch/wheel unchanged.
 - City hit-testing uses the JS nearest-point grid below (not `circle.dot-hit`, which is O(n²)).
 - Counters: plan-ux's tile "Cities: N · in M countries" plus a muted line "Capitals x / 197" (count national capitals in the data).
@@ -47,11 +47,12 @@ Usage `python3 tools/make-cities.py [--src local.geojson] [--check]`.
 
 ## 5. Output format
 ```
-{ "v":1, "src":"ne_10m_populated_places v5.1.2 <sha>", "proj":"equalearth s=184.7316 t=500,243.36",
-  "r":["Illinois","São Paulo",...],
-  "c":[[1159151299,"São Paulo",["Sao Paulo"],"BRA",1,2,1.0,330.1,321.4], ...] }
+{ "v":2, "src":"ne_10m_populated_places v5.1.2 <sha>", "proj":"equalearth s=184.7316 t=500,243.36",
+  "naProj":"main conic 40/62 rot 100 s=857.3514 t=545.3216,1187.4781; US-HI ...", "r":["Illinois","São Paulo",...],
+  "c":[[1159151299,"São Paulo",["Sao Paulo"],"BRA",1,2,1.0,330.1,321.4],
+       [1159149261,"Austin",0,"USA",1429,1,5.4,246.3,132.9,575.5,784.2,-1,"US-TX",1.5], ...] }
 ```
-Row: `[ne_id, name, aliases|0, worldId, admin1Index|-1, flags, z, x, y]`; client adds `C-`. ~200–230 KB raw, ~65–80 KB gzip.
+Row: `[ne_id, name, aliases|0, worldId, admin1Index|-1, flags, z, x, y]`; client adds `C-`. v2 (phase 2) appends, for cities on the NA map only, `[nx, ny, inset|-1, naId, nz]`: NA map position, the na.json inset index it is drawn in (-1 = main map), its state/province/territory id there, and its NA zoom tier. A v1 client reads v2 unchanged (it ignores the extra fields); the client reads v1 too (no NA layer). ~270 KB raw, ~107 KB gzip.
 
 ## 6. Rendering: `js/cities.js`
 - API: `Cities.load()` → Promise; `Cities.mount(svg, view, { isOn, onToggle, onTip })` → `{ update(vb, k), hit(clientX, clientY), refresh(id), count() }`. Integrate through the `window.Atlas` seam in plan-ux §7 (app.js gets `onView(vb, k)` at the end of `apply()` and `onTap(e)` checked first in `endPointer` on a non-moving tap; return true to skip the country toggle).
@@ -74,8 +75,29 @@ After load, add entries `{ p, key: norm(name + aliases), pop, country, admin1 }`
 ## 10. Risks
 Sync caps (data plan); `ne_id` churn (lock + remap); coastal cities outside 1:50m polygons (3-unit fallback + report); disputed places (our map decides, overrides pinned); dated populations/missing small towns (documented); density in Europe/Caribbean (z thinning, measure at 360 px); allowlist growth (acceptable); small-dot contrast in dark/Real (ring).
 
-## 11. Phase 2 (not v1)
-Cities on the NA map: fit Albers parameters (parallels near 29.5/45.5 etc. + rotation) from NE 1:50m admin-1 vertices against na.json, accept if median error < 0.5; insets need their own transforms.
+## 11. Phase 2: cities on the NA map (done 2026-10-15)
+Selection adds every US state capital and Canadian provincial/territorial capital (`FEATURECLA` "Admin-1 capital", `ADM0_A3` USA/CAN) and every NE row in the five US territories (NE 1:10m has no Charlotte Amalie or Saipan: the Virgin Islands get Christiansted, the Northern Marianas "Capitol Hill" on Saipan). That added 11 cities (3,309 → 3,320): Montpelier, Dover, Annapolis, Carson City, Jefferson City, Frankfort, Concord, Fredericton, Capitol Hill, Christiansted, Arecibo. Every other capital (Juneau, Pierre, Iqaluit, …) was already in through `SCALERANK` ≤ 4. 382 cities are on the NA map; every state, province and territory has at least one. World coordinates and world tiers are unchanged.
+
+**Projection, reproduced from na.json** (python stdlib in `tools/make-cities.py`; `--fit-na` refits from scratch). Fit: bounding-box least squares per polygon, then 10 rounds of nearest-vertex least squares (ICP) of `x = tx + s·X, y = ty − s·Y` against na.json's vertices; outlines from NE 1:50m admin-1 (states, provinces, D.C., Hawaii) and admin-0 (territories), v5.1.2, pinned under `na_fit` in `tools/cities-source.json`.
+
+| Frame | Projection (d3 raw) | s | tx | ty | Outline error median / p95 (units) |
+|---|---|---|---|---|---|
+| Main map | geoConicEqualArea, parallels 40°/62°, rotate [100, 0] (the original brief) | 857.3514 | 545.3216 | 1187.4781 | 0.049 / 0.090 (10,960 vertices) |
+| Hawaii inset | geoConicEqualArea, parallels 8°/18°, rotate [157, 0] (d3.geoAlbersUsa's Hawaii) | 1691.9365 | 112.1869 | 1547.7170 | 0.038 / 0.062 |
+| Puerto Rico | geoMercator | 2688.7364 | 3392.1130 | 1811.5451 | 0.039 / 0.066 |
+| U.S. Virgin Is. | geoMercator | 7651.6594 | 9063.1155 | 3391.5353 | 0.034 / 0.058 |
+| Guam | geoMercator | 14667.0112 | −36532.7443 | 4413.4604 | 0.037 / 0.054 |
+| N. Mariana Is. | geoMercator | 1123.3106 | −2198.9737 | 1268.5001 | 0.033 / 0.053 |
+| American Samoa | geoMercator | 24743.6259 | 74502.1380 | −5303.5176 | 0.029 / 0.064 |
+| Washington, D.C. inset (zoom) | geoMercator | 20848.5702 | 28952.6574 | 16332.5159 | 0.042 / 0.058 |
+
+The brief's parameters fit: neighbours (29.5/45.5, 39/62, 41/62, 40/61, 40/63, rotate 96/104) all give medians of 0.43–2.9 units. Alaska is on the main map at true scale (no inset). The Hawaii inset shows the eight main islands only. The D.C. inset is a zoomed view; Washington and the D.C.-area cities are drawn on the main map only.
+
+**Build self-checks** (fail the build): every frame's outline median < 0.5 units and a refit that moves no outline point more than 0.1 units from the constants; ≥ 98% of NA cities inside (or within 2 units of) their own state/province/territory polygon (result: 100%, 382/382); anchor median < 0.5 (US-DC dot vs Washington: 0.31). State assignment: point-in-polygon on na.json within the city's frame, else its own polygon within 2 units, else nearest within 3; disagreements with `ADM1NAME` are printed and pinned with `"na"` in `tools/cities-overrides.json` (Windsor → CA-ON, International Falls → US-MN, El Paso → US-TX: border artifacts).
+
+**NA tiers** use the same rule on the NA map's own coordinates (1000 units wide, 360 px reference, 8 px spacing): 144 cities at tier 1.
+
+**Client.** The layer runs on both maps (`Atlas.addLayer('na', …)`, `onTap('na', …)`, same pool, culling, labels, 12 px nearest tap, ≤ 600 nodes); on the NA map it is drawn last so inset cities sit above the tray. Marking a US/Canadian city Been there also marks its state/province/territory if unmarked, and its country as before ("Austin, Texas and United States: been there"; "Austin and Texas: …" when the country is already marked). The NA map has its own tile ("Cities: N · in M states and provinces") and a "Cities (n):" list grouped by state/province/territory; the World list shows only cities that are not on the NA map, while the World tile still counts every city. Search picks of US/Canadian cities fly to the NA map. Perf (4× throttle, desktop): NA update p95 ≤ 1 ms, label relayout ≤ 1.2 ms, ≤ 232 nodes.
 
 ## 12. Work breakdown
 | Task | Owns | Depends on | Tests |
