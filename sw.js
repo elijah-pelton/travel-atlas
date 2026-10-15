@@ -20,7 +20,7 @@
  *   everything else          cache-first from this version's shell cache (css, js, data,
  *                            icons, fonts), network fallback, successful responses stored
  */
-const VERSION = 'e7a1002fe6';
+const VERSION = 'c7fbfa9b0d';
 const SHELL_CACHE = 'atlas-shell-' + VERSION;
 const TERRAIN_CACHE = 'atlas-terrain';
 const LEGACY_TERRAIN_PREFIX = 'atlas-terrain-';   // old per-version terrain caches
