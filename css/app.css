@@ -556,7 +556,7 @@
   .howto[open] summary::before { transform: rotate(90deg); }
   .howto summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 12px; }
   .howto-body { padding: 0 16px 14px; font-size: 14px; line-height: 1.55; color: var(--ink); max-width: 72ch; }
-  .howto-body h3 { font-family: var(--font-display); font-size: 15px; margin: 14px 0 4px; }
+  .howto-body h2 { font-family: var(--font-display); font-size: 15px; margin: 14px 0 4px; }
   .howto-body p, .howto-body ul { margin: 4px 0; }
   .howto-body ul { padding-left: 20px; }
   .howto-body li { margin: 3px 0; }

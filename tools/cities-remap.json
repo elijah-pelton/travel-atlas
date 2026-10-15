@@ -1,0 +1,3 @@
+{
+  "_comment": "Published city ids that no longer appear in the build. Map an old id to its replacement (\"C-old\": \"C-new\", matched via wikidataid) or to \"retired\". Entries stay forever; the app remaps old ids on load."
+}

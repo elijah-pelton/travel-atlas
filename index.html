@@ -19,13 +19,14 @@
 <script src="./js/accent.js"></script>
 <link rel="stylesheet" href="./css/fonts.css">
 <link rel="stylesheet" href="./css/app.css">
+<link rel="stylesheet" href="./css/features.css">
 </head>
 <body>
 <div class="page">
   <header class="masthead">
     <div>
       <h1><span class="owner" id="owner" contenteditable="true" spellcheck="false" role="textbox" aria-label="Whose atlas this is" title="Click to put your name here"></span><span class="poss">’s</span> Travel Atlas</h1>
-      <p class="sub">Click a state, province, or country to mark it. Click again to clear it. Switch to the real map for terrain and names. Click the name above to make it yours.</p>
+      <p class="sub">Tap a state, province, country or city to mark it. Use the switch on the map to mark places you want to go. Tap a name in the lists to add a rating or a note. Zoom in on the world map to see cities, and tap the name above to make the atlas yours.</p>
     </div>
     <div class="tools">
       <div class="search">
@@ -61,26 +62,31 @@
   <details class="howto" id="howto">
     <summary>How it works</summary>
     <div class="howto-body">
-      <p>Click or tap any state, province or country you’ve been to. Click it again to clear it. Your marks save on this phone or computer automatically, with no account and nothing uploaded.</p>
-      <h3>Install it</h3>
+      <p>Tap any state, province or country you’ve been to. The Been there | Want to go switch in the corner of each map changes what a tap marks; places you want to go show up striped. Tap a place again to clear it. Your marks save on this phone or computer automatically, with no account and nothing uploaded.</p>
+      <h2>Install it</h2>
       <p>On iPhone, open this page in Safari, then Share → Add to Home Screen. On Android or a computer, use the Install button up top (or your browser’s install option). Install first, then start marking; on iPhone, marks made in a Safari tab don’t carry over to the installed app.</p>
-      <h3>Share</h3>
+      <h2>Notes and ratings</h2>
+      <p>Tap a name in the lists below a map to give it a rating from 1 to 5, the year you went and a short note. The Ratings map style colors the map by your stars. Only you see notes and ratings, unless you turn on the notes link in Share.</p>
+      <h2>Cities</h2>
+      <p>Zoom into the world map and cities appear as dots. Marking a city also marks its country. Search finds any of about 3,300 cities, even ones too small to show yet. Cities need one visit while online before they work offline.</p>
+      <h2>Share</h2>
       <p>This is how your map gets to your other devices and to other people.</p>
       <ul>
-        <li>Share → Create link gives you a view link you can send anyone. They see your map but can’t change it.</li>
+        <li>Share → Create link gives you a view link that shows your map only: where you’ve been and want to go, never your notes. Anyone can open it; nobody can change your map with it.</li>
+        <li>A second link, map with notes, stays off until you switch it on. It shows your ratings, years and notes too, and stops working if you switch it off or reset it.</li>
         <li>To add your own laptop or tablet, open Share here and scan the QR code with that device’s camera. After that, both stay in sync, even if you mark things offline.</li>
         <li>Only open an edit link on your own devices, since anyone with it can change your map. If one ever ends up with the wrong person, Reset edit access shuts it off.</li>
       </ul>
-      <h3>Backup</h3>
-      <p>A manual copy, separate from Share. It gives you a code starting with <code>atlas1:</code>, or a file you can download. Paste the code or pick the file on any device to bring your marks back. The atlas reminds you to make one now and then if you aren’t using Share.</p>
+      <h2>Backup</h2>
+      <p>A manual copy, separate from Share. The code holds your map only (been there and want to go); the backup file has everything, notes and ratings included. Paste the code or pick the file on any device to bring it back. Older codes starting with <code>atlas1:</code> still restore. The atlas reminds you to make a backup now and then if you aren’t using Share.</p>
     </div>
   </details>
 
   <dialog id="backup" class="dlg-box" aria-labelledby="backup-title">
     <form method="dialog" class="dlg">
       <div class="dlg-head"><h2 id="backup-title">Backup &amp; restore</h2><button type="submit" class="x" aria-label="Close">×</button></div>
-      <p class="dlg-sub">Your marks live on this device. Copy the code or download a file to keep a backup or move your marks to another phone or computer. Paste a code and press Restore, or choose a backup file, to bring marks back.</p>
-      <label class="dlg-label" for="code-out">Your backup code</label>
+      <p class="dlg-sub">Your marks live on this device. Copy the code or download a file to keep a backup or move your marks to another phone or computer. Paste a code and press Restore, or choose a backup file, to bring marks back. The code holds your map only; the file also keeps your notes, ratings and years.</p>
+      <label class="dlg-label" for="code-out">Your backup code (map only; notes are in the backup file)</label>
       <textarea id="code-out" readonly rows="3" spellcheck="false"></textarea>
       <div class="dlg-row"><button type="button" class="btn primary" id="copy-code">Copy code</button><button type="button" class="btn" id="download-backup">Download backup</button><span class="dlg-note" id="copy-note"></span></div>
       <label class="dlg-label" for="code-in">Restore from a code</label>
@@ -106,9 +112,28 @@
       </div>
       <div class="dlg-part" id="share-on" hidden>
         <p class="dlg-sub" id="share-sub"></p>
-        <label class="dlg-label" for="share-view">View link</label>
-        <input type="text" id="share-view" class="dlg-input mono" readonly spellcheck="false">
-        <div class="dlg-row"><button type="button" class="btn primary" id="share-copy">Copy</button><button type="button" class="btn" id="share-native" hidden>Share</button><span class="dlg-note" id="share-copy-note"></span></div>
+        <div class="dlg-label" id="share-links-label">View links</div>
+        <div class="link-rows" role="group" aria-labelledby="share-links-label">
+          <div class="link-row" id="share-view-row">
+            <label class="link-name" for="share-view">Map only</label>
+            <div class="link-ctl"><input type="text" id="share-view" class="dlg-input mono" readonly spellcheck="false" aria-describedby="share-view-desc"><button type="button" class="btn primary" id="share-copy">Copy</button><button type="button" class="btn" id="share-native" hidden>Share</button></div>
+            <p class="link-desc" id="share-view-desc">Places you’ve been and want to go. No notes or ratings.</p>
+            <p class="dlg-note" id="share-copy-note" role="status"></p>
+          </div>
+          <button type="button" class="switch" id="share-notes-switch" role="switch" aria-checked="false">Also make a link that shows my notes and ratings</button>
+          <p class="dlg-note" id="share-notes-msg" role="status" hidden></p>
+          <div class="share-confirm" id="share-notes-confirm" role="group" aria-labelledby="share-notes-confirm-text" hidden>
+            <p id="share-notes-confirm-text"></p>
+            <div class="dlg-row"><button type="button" class="btn danger" id="share-notes-confirm-yes">Turn off</button><button type="button" class="btn" id="share-notes-confirm-no">Keep it</button></div>
+          </div>
+          <div class="link-row" id="share-notes-row" hidden>
+            <label class="link-name" for="share-notes-url">Map with notes</label>
+            <div class="link-ctl"><input type="text" id="share-notes-url" class="dlg-input mono" readonly spellcheck="false" aria-describedby="share-notes-desc"><button type="button" class="btn primary" id="share-notes-copy">Copy</button><button type="button" class="btn" id="share-notes-native" hidden>Share</button></div>
+            <p class="link-desc" id="share-notes-desc">Anyone with this link can read your notes, ratings and years.</p>
+            <p class="dlg-note" id="share-notes-note" role="status"></p>
+            <p class="link-desc"><button type="button" class="btn link-reset" id="share-notes-reset">Reset notes link</button></p>
+          </div>
+        </div>
         <div class="dlg-label">Add a device</div>
         <div class="qr-row">
           <div class="qr" id="share-qr" role="img" aria-label="QR code of the edit link"></div>
@@ -137,10 +162,11 @@
     </div>
     <div class="frame" id="frame-na">
       <div class="frame-loading" role="status">Loading maps…</div>
+      <div class="seg mark-seg" role="group" aria-label="What a tap marks" data-for="na"><button type="button" data-mode="been" aria-pressed="true"><span class="sw been" aria-hidden="true"></span>Been there</button><button type="button" data-mode="want" aria-pressed="false"><span class="sw want" aria-hidden="true"></span>Want to go</button></div>
       <div class="zoom" data-for="na"></div>
       <div class="toast" id="toast-na" role="status" aria-live="polite"></div>
     </div>
-    <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
+    <div class="legend" id="legend-na"><span><i class="on"></i>Been there</span><span><i class="want"></i>Want to go</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place: tap the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
     <div class="visited-list" id="list-na"></div>
   </section>
 
@@ -154,21 +180,26 @@
     </div>
     <div class="frame" id="frame-world">
       <div class="frame-loading" role="status">Loading maps…</div>
+      <div class="seg mark-seg" role="group" aria-label="What a tap marks" data-for="world"><button type="button" data-mode="been" aria-pressed="true"><span class="sw been" aria-hidden="true"></span>Been there</button><button type="button" data-mode="want" aria-pressed="false"><span class="sw want" aria-hidden="true"></span>Want to go</button></div>
       <div class="zoom" data-for="world"></div>
       <div class="toast" id="toast-world" role="status" aria-live="polite"></div>
     </div>
-    <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
+    <div class="legend" id="legend-world"><span><i class="on"></i>Been there</span><span><i class="want"></i>Want to go</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place: tap the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
     <div class="visited-list" id="list-world"></div>
   </section>
 
   <footer>
-    <p>Your marks are saved on this device. Your map is shared only if you create a link with Share.</p>
-    <p>Map data: Natural Earth 1:50m (public domain). Equal Earth projection for the world; Albers equal-area conic for North America. Country count follows the 193 UN members plus Vatican City, Kosovo, and Taiwan. Terrain: Natural Earth I shaded relief.</p>
+    <p>Your marks and notes are saved on this device. Your map is shared only if you create a link with Share.</p>
+    <p>Map data: Natural Earth 1:50m (public domain). Equal Earth projection for the world; Albers equal-area conic for North America. Country count follows the 193 UN members plus Vatican City, Kosovo, and Taiwan. Terrain: Natural Earth I shaded relief. Cities: Natural Earth 1:10m populated places (public domain).</p>
     <p><a href="https://github.com/elijah-pelton/travel-atlas">Source on GitHub</a></p>
   </footer>
 </div>
 <div class="tip" id="tip"></div>
 <div class="update-toast" id="update-toast" role="status" hidden><span>Update available ·</span><button type="button" class="btn" id="update-reload">Reload</button></div>
+<script src="./js/store.js"></script>
 <script src="./js/app.js"></script>
+<script defer src="./js/places-panel.js"></script>
+<script defer src="./js/ratings.js"></script>
+<script defer src="./js/cities.js"></script>
 </body>
 </html>

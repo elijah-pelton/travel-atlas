@@ -1,0 +1,420 @@
+/* Travel Atlas: Want to go, notes and ratings, cities (docs/plan-ux.md §2-§3, docs/plan-cities.md §6).
+   Loaded after css/app.css. Uses only app.css tokens plus the new ones below. No inline styles
+   anywhere (CSP style-src 'self'): JS toggles classes/attributes, and may set widths/sizes via CSSOM.
+
+   SELECTOR CONTRACT (what the JS builders may rely on)
+   ---------------------------------------------------------------------------------------------
+   Tokens on :root (light / dark in all three theme blocks):
+     --want-stripe   stripe + dashed outline color (light: visited-hover darkened toward
+                     visited-ink so it reaches 3:1 on land in every accent; dark: --visited)
+     --want-ink      text color of want chips (= --visited-ink)
+     --r1 .. --r5    ratings ramp: color-mix(in oklab, var(--visited) 22/40/60/80/100%, var(--land))
+
+   Body / root state classes:
+     body.real        existing "Real map" style
+     body.ratings     new "Ratings" style (flat base, no terrain; set by ratings.js / app.js)
+     body.view-only   existing view pages (both link kinds)
+     body.view-notes  map-with-notes view page (set together with body.view-only)
+
+   Map SVG (svg.map[data-map="na"|"world"]):
+     <pattern id="want-na|want-world"> > rect.want-bg + line.want-line
+                      JS sets the pattern width/height and line coords/stroke-width (6/k, 2/k)
+                      as attributes; this file only sets colors (CSS never sets stroke-width here,
+                      so the attributes win).
+     .place.want      striped fill url(#want-<map>) + dashed --want-stripe outline
+     .dot.want        land fill + 2px non-scaling ring
+     .inset-bg.want   dashed accent stroke, no tint
+     .place.r1 .. .r5, .dot.r1 .. .r5, .city.r1 .. .r5   ramp fills (paint only under body.ratings)
+     .place.unrated, .dot.unrated, .city.unrated          been, no rating: land + 1.5px accent outline
+                      (under body.ratings any .on without r1-r5 also gets this look)
+     g.cities         city layer (above .dots); add .loading while data loads to fade it in
+     circle.city      pooled city dot; states .on / .want; .capital adds a ring; r set by JS
+     circle.city-hit  optional transparent hit circle (plan-cities uses a hit grid instead)
+     g.city-labels > text.city-lbl   city names, left anchored (font-size set by JS like .lbl)
+
+   Marking switch (inside #frame-na / #frame-world):
+     .seg.mark-seg[role=group]  top left of the frame; buttons use aria-pressed
+       button > span.sw.been | span.sw.want   solid / striped swatch
+     .frame.mode-want           2px dashed accent outline inside the frame
+
+   Toast:
+     .toast > button.toast-act  "Details" (clickable only while .toast.show)
+
+   Lists / chips:
+     .visited-list .list-group          one block per list ("Been there (12):", "Want to go (4):", "Cities (14):")
+     .visited-list .list-group .lead    existing lead label
+     .visited-list .city-group          "Japan: Kyoto, Osaka" group; > .grp is the "Japan:" label
+     .chip.want                          outline chip (dashed, transparent)
+     .chip > .ci-note                    note glyph (inline svg or text)
+     .chip > .ci-rate                    "★4" in mono
+     span.chip / body.view-only .chip    plain text chip; body.view-notes button.chip stays clickable
+
+   Search:
+     .search .results li.want .check   striped ring (li.on stays filled)
+
+   Counters:
+     .stat .want-line             muted "+3 want to go" ([hidden] at 0)
+     .stat .bar > i + i.want       second, striped bar segment (width via CSSOM)
+     .stat.city-stat               cities tile (bar hidden)
+
+   Legend:
+     .legend i.want / i.city / i.unrated / i.r1 .. i.r5    swatches
+     .legend .num                                           mono number next to a ramp swatch
+     .legend.legend-ratings        ratings legend (shown only under body.ratings; normal legends hide)
+     .ratings-hint                 "Rate places from the lists below..." (shown only under body.ratings)
+
+   Details panel (js/places-panel.js):
+     dialog.dlg-box.place-panel (> form.dlg)     centered 420px; <=640px bottom sheet
+     .place-panel.readonly                       read-only variant (view-notes)
+     .place-panel .dlg-sub                       "Country · World"
+     .seg.status-seg[role=radiogroup] > button[role=radio][aria-checked]
+     .pp-field                                   label + control block
+     .stars[role=radiogroup] > label.star > input[type=radio] + svg   (lit via :checked or .lit)
+     .stars > label.star-none > input[type=radio] + text "No rating"
+     .stars-ro > svg.star-ro(.lit)               read-only stars
+     .dlg-input.year-input                       4-digit year
+     textarea.note-input + .note-count[hidden]   note + "120 left"
+     .place-ro                                   read-only text line ("Went in 2019", "No note.")
+     .place-foot > .place-privacy + .btn.primary footer
+
+   Share dialog (#share-on):
+     .link-rows > .link-row > .link-name + .link-ctl(> input.dlg-input.mono + .btn + .btn) + .link-desc + .dlg-note
+     button.switch[role=switch][aria-checked]    notes-link switch (track + thumb are pseudo-elements)
+     .share-confirm                              inline "Turn off the notes link?" box (> p + .dlg-row)
+
+   Banner (view pages):
+     .banner .banner-tag     small "with notes" style pill
+     .banner .banner-sub     muted second line ("This link no longer shows notes.")
+   --------------------------------------------------------------------------------------------- */
+
+/* ---------- tokens ---------- */
+:root {
+  /* visited-hover alone is 2.8:1 on light land for amber; a 20% step toward visited-ink clears 3:1 */
+  --want-stripe: var(--visited-hover);
+  --want-ink: var(--visited-ink);
+  --r1: color-mix(in oklab, var(--visited) 22%, var(--land));
+  --r2: color-mix(in oklab, var(--visited) 40%, var(--land));
+  --r3: color-mix(in oklab, var(--visited) 60%, var(--land));
+  --r4: color-mix(in oklab, var(--visited) 80%, var(--land));
+  --r5: var(--visited);
+}
+@supports (color: color-mix(in oklab, red, blue)) {
+  :root { --want-stripe: color-mix(in oklab, var(--visited-hover) 75%, var(--visited-ink)); }
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --want-stripe: var(--visited); }
+}
+:root[data-theme="dark"] { --want-stripe: var(--visited); }
+
+/* ---------- Want to go on the maps ---------- */
+svg.map .want-bg { fill: var(--land); stroke: none; }
+svg.map .want-line { stroke: var(--want-stripe); }
+svg.map .place.want {
+  fill: var(--land);
+  stroke: var(--want-stripe); stroke-width: 1; stroke-dasharray: 3 2;
+}
+svg.map[data-map="na"] .place.want { fill: url(#want-na) var(--land); }
+svg.map[data-map="world"] .place.want { fill: url(#want-world) var(--land); }
+svg.map .place.want:hover { stroke-width: 2; }
+
+svg.map .dot.want { fill: var(--land); stroke: var(--want-stripe); stroke-width: 2; }
+svg.map .dot.want:hover { fill: var(--land-hover); }
+svg.map .inset-bg.want { stroke: var(--want-stripe); stroke-dasharray: 4 3; stroke-width: 1.5; }
+
+body.real svg.map .want-bg { fill: transparent; }
+body.real svg.map .want-line { stroke-opacity: .8; }
+body.real svg.map .place.want { stroke: var(--want-stripe); stroke-width: 1; }
+body.real svg.map .place.want:hover { stroke-width: 2; }
+body.real svg.map .inset-bg.want { fill: rgba(0, 0, 0, 0); stroke: var(--want-stripe); stroke-width: 2; }
+body.real svg.map .dot.want { stroke: var(--want-stripe); }
+
+/* ---------- cities layer ---------- */
+svg.map .cities { transition: opacity .3s ease; }
+svg.map .cities.loading { opacity: 0; }
+svg.map .city { fill: var(--land); stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
+svg.map .city:hover { fill: var(--land-hover); stroke: var(--ink); }
+svg.map .city.capital { stroke: var(--ink); stroke-width: 1.6; }
+svg.map .city.on { fill: var(--visited); stroke: var(--visited-hover); }
+svg.map .city.on.capital { stroke: var(--ink); }
+svg.map .city.want { fill: var(--land); stroke: var(--want-stripe); stroke-width: 2; }
+svg.map .city-hit { fill: transparent; stroke: none; pointer-events: all; cursor: pointer; }
+svg.map .city-labels { pointer-events: none; }
+svg.map .city-lbl {
+  font-family: var(--font-body); font-weight: 500; fill: var(--label-ink); stroke: var(--label-halo);
+  stroke-linejoin: round; paint-order: stroke fill; text-anchor: start; dominant-baseline: middle;
+}
+body.real svg.map .city { stroke: var(--label-ink); }
+body.real svg.map .city.on { stroke: var(--visited-hover); }
+body.real svg.map .city.want { stroke: var(--want-stripe); }
+body.view-only svg.map .city, body.view-only svg.map .city-hit { cursor: default; }
+body.view-notes svg.map .city.on, body.view-notes svg.map .city.want { cursor: pointer; }
+
+/* ---------- Ratings style (flat base) ---------- */
+body.ratings svg.map .terrain, body.ratings svg.map .labels { display: none; }
+/* want and unmarked places are plain land here */
+body.ratings svg.map .place.want,
+body.ratings svg.map[data-map="na"] .place.want,
+body.ratings svg.map[data-map="world"] .place.want { fill: var(--land); stroke: var(--line); stroke-width: .6; stroke-dasharray: none; }
+body.ratings svg.map .dot.want, body.ratings svg.map .city.want { fill: var(--land); stroke: var(--line); stroke-width: 1.2; }
+body.ratings svg.map .inset-bg.want { stroke: var(--rule); stroke-dasharray: none; stroke-width: 1; }
+/* been without a rating: land + 1.5px accent outline (.unrated, or any .on that has no r1-r5) */
+body.ratings svg.map .place:is(.on, .unrated):not(.r1, .r2, .r3, .r4, .r5) { fill: var(--land); stroke: var(--want-stripe); stroke-width: 1.5; }
+body.ratings svg.map :is(.dot, .city):is(.on, .unrated):not(.r1, .r2, .r3, .r4, .r5) { fill: var(--land); stroke: var(--want-stripe); stroke-width: 1.5; }
+body.ratings svg.map .place:is(.on, .unrated):not(.r1, .r2, .r3, .r4, .r5):hover { fill: var(--land-hover); }
+body.ratings svg.map :is(.place, .dot, .city).r1 { fill: var(--r1); }
+body.ratings svg.map :is(.place, .dot, .city).r2 { fill: var(--r2); }
+body.ratings svg.map :is(.place, .dot, .city).r3 { fill: var(--r3); }
+body.ratings svg.map :is(.place, .dot, .city).r4 { fill: var(--r4); }
+body.ratings svg.map :is(.place, .dot, .city).r5 { fill: var(--r5); }
+body.ratings svg.map .place:is(.r1, .r2, .r3, .r4) { stroke: var(--line); stroke-width: .6; }
+body.ratings svg.map .place.r5 { stroke: var(--visited-hover); stroke-width: .6; }
+body.ratings svg.map :is(.dot, .city):is(.r1, .r2, .r3, .r4) { stroke: var(--line); stroke-width: 1.2; }
+body.ratings svg.map :is(.dot, .city).r5 { stroke: var(--visited-hover); stroke-width: 1.2; }
+body.ratings svg.map .place:is(.r1, .r2, .r3, .r4, .r5):hover { stroke: var(--ink); stroke-width: 1.2; }
+/* fallback for browsers without color-mix(): accent at stepped opacity */
+@supports not (color: color-mix(in oklab, red, blue)) {
+  body.ratings svg.map :is(.place, .dot, .city):is(.r1, .r2, .r3, .r4) { fill: var(--visited); }
+  body.ratings svg.map :is(.place, .dot, .city).r1 { fill-opacity: .22; }
+  body.ratings svg.map :is(.place, .dot, .city).r2 { fill-opacity: .4; }
+  body.ratings svg.map :is(.place, .dot, .city).r3 { fill-opacity: .6; }
+  body.ratings svg.map :is(.place, .dot, .city).r4 { fill-opacity: .8; }
+  .legend i.r1, .legend i.r2, .legend i.r3, .legend i.r4 { background: var(--visited); }
+  .legend i.r1 { opacity: .22; }
+  .legend i.r2 { opacity: .4; }
+  .legend i.r3 { opacity: .6; }
+  .legend i.r4 { opacity: .8; }
+}
+
+/* ---------- marking switch + Want mode cue ---------- */
+.mark-seg {
+  position: absolute; top: 12px; left: 12px; z-index: 5;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08);
+}
+.mark-seg .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; border: 1px solid var(--visited-hover); }
+.mark-seg .sw.been { background: var(--visited); }
+.mark-seg .sw.want {
+  border: 1px dashed var(--want-stripe);
+  background: repeating-linear-gradient(45deg, var(--want-stripe) 0 2px, var(--land) 2px 5px);
+}
+.mark-seg button[aria-pressed="true"] .sw { border-color: var(--bg); }
+.mark-seg[hidden], body.view-only .mark-seg { display: none; }
+.frame.mode-want { outline: 2px dashed var(--want-stripe); outline-offset: -2px; }
+
+/* ---------- toast action ---------- */
+.toast .toast-act {
+  position: relative; margin-left: 10px; padding: 0 2px; border: 0; background: transparent; color: inherit;
+  font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.toast .toast-act::after { content: ""; position: absolute; inset: -6px -8px; }
+.toast.show .toast-act { pointer-events: auto; }
+.toast .toast-act:focus-visible { outline: 2px solid var(--bg); outline-offset: 2px; border-radius: 3px; }
+.toast .toast-act[hidden] { display: none; }
+
+/* ---------- lists and chips ---------- */
+.visited-list .list-group { display: block; margin: 2px 0; }
+.visited-list .list-group + .list-group { margin-top: 8px; }
+.visited-list .list-group[hidden] { display: none; }
+.visited-list .city-group { display: inline; margin-right: 10px; }
+.visited-list .city-group .grp { color: var(--muted); margin-right: 4px; }
+/* chips open details now, so hover underlines instead of striking through */
+.chip:hover { text-decoration: underline; text-underline-offset: 2px; }
+.chip.want {
+  background: transparent; color: var(--want-ink);
+  border: 1.5px dashed var(--want-stripe); padding: 0.5px 6.5px 0.5px 7.5px;
+}
+.chip .ci-note { display: inline-flex; width: 12px; height: 12px; opacity: .85; }
+.chip .ci-note svg { width: 12px; height: 12px; }
+.chip .ci-rate { font-family: var(--font-mono); font-size: 11.5px; opacity: .9; }
+span.chip, body.view-only .chip { cursor: default; }
+span.chip:hover, body.view-only .chip:hover { text-decoration: none; }
+body.view-notes button.chip { cursor: pointer; }
+body.view-notes button.chip:hover { text-decoration: underline; }
+
+/* ---------- search row check ---------- */
+.search .results li.want .check {
+  border-color: var(--want-stripe);
+  background: repeating-linear-gradient(45deg, var(--want-stripe) 0 1.5px, transparent 1.5px 4px);
+}
+
+/* ---------- counters ---------- */
+.stat .want-line { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.stat .want-line::before {
+  content: ""; width: 10px; height: 8px; border-radius: 2px; border: 1px dashed var(--want-stripe);
+  background: repeating-linear-gradient(45deg, var(--want-stripe) 0 1.5px, transparent 1.5px 4px);
+}
+.stat .want-line[hidden] { display: none; }
+.stat .bar { display: flex; }
+.stat .bar i { flex: none; border-radius: 0; }
+.stat .bar i.want { background: repeating-linear-gradient(45deg, var(--want-stripe) 0 2px, transparent 2px 4px); }
+.stat.city-stat .bar { display: none; }
+
+/* ---------- legend ---------- */
+.legend i.want {
+  border: 1px dashed var(--want-stripe);
+  background: repeating-linear-gradient(45deg, var(--want-stripe) 0 2px, var(--land) 2px 5px);
+}
+.legend i.city { width: 6px; height: 6px; border-radius: 50%; }
+.legend i.unrated { background: var(--land); border: 1.5px solid var(--want-stripe); }
+.legend i.r1 { background: var(--r1); }
+.legend i.r2 { background: var(--r2); }
+.legend i.r3 { background: var(--r3); }
+.legend i.r4 { background: var(--r4); }
+.legend i.r5 { background: var(--r5); border-color: var(--visited-hover); }
+.legend .num { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink); }
+.legend .ramp { display: inline-flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; }
+.legend .ramp > span { gap: 4px; }
+.legend.legend-ratings, .ratings-hint { display: none; }
+body.ratings .legend.legend-ratings { display: flex; }
+body.ratings .legend:not(.legend-ratings) { display: none; }
+body.ratings .ratings-hint { display: block; margin: 8px 2px 0; font-size: 12.5px; color: var(--muted); }
+.ratings-hint[hidden], body.ratings .ratings-hint[hidden] { display: none; }
+
+/* ---------- details panel ---------- */
+dialog.place-panel { width: min(420px, 94vw); }
+.place-panel .dlg { gap: 12px; }
+.place-panel .dlg-head { align-items: flex-start; gap: 12px; }
+.place-panel .dlg-head h2 { line-height: 1.2; overflow-wrap: anywhere; }
+.place-panel .dlg-sub { margin-top: -8px; }
+.pp-field { display: grid; gap: 6px; }
+.pp-field[hidden] { display: none; }
+.pp-field .dlg-label { margin-top: 0; }
+.status-seg { display: flex; width: 100%; }
+.status-seg button { flex: 1 1 0; justify-content: center; min-height: 32px; }
+.seg button[role="radio"][aria-checked="true"] { background: var(--ink); color: var(--bg); }
+.seg button[role="radio"]:hover:not([aria-checked="true"]) { color: var(--ink); }
+
+.stars { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; border: 0; padding: 0; margin: 0; }
+.stars .star {
+  position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+}
+.stars .star:hover { background: var(--panel-2); }
+.stars input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.stars .star svg, .stars-ro .star-ro { width: 24px; height: 24px; fill: transparent; stroke: var(--visited-ink); stroke-width: 1.5; stroke-linejoin: round; }
+.stars-ro .star-ro { width: 18px; height: 18px; }
+.stars .star.lit svg, .stars-ro .star-ro.lit,
+.stars .star:has(input:checked) svg,
+.stars .star:has(~ .star input:checked) svg { fill: var(--visited-ink); }
+.stars:has(.star-none input:checked) .star svg { fill: transparent; }
+.stars .star:has(input:focus-visible), .stars .star-none:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
+.stars .star-none {
+  position: relative; margin-left: 8px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--rule);
+  font-size: 13px; color: var(--muted); cursor: pointer;
+}
+.stars .star-none:hover { color: var(--ink); }
+.stars .star-none:has(input:checked), .stars .star-none.lit { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.stars-ro { display: inline-flex; gap: 2px; vertical-align: middle; }
+.dlg-input.year-input { width: 9ch; font-variant-numeric: tabular-nums; }
+.place-panel textarea.note-input {
+  font-family: var(--font-body); font-size: 14px; line-height: 1.45; min-height: 96px; padding: 8px 10px;
+}
+.note-count { margin: 0; text-align: right; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.note-count[hidden] { display: none; }
+.place-ro { margin: 0; font-size: 14px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.place-ro.none { color: var(--muted); }
+.place-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.place-privacy { margin: 0; flex: 1 1 200px; font-size: 12.5px; color: var(--muted); }
+.place-panel.readonly .status-seg button { cursor: default; }
+
+/* ---------- Share: two view links ---------- */
+.link-rows { display: grid; gap: 14px; }
+.link-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 6px 12px; align-items: center; }
+.link-row[hidden] { display: none; }
+.link-row .link-name { font-size: 13.5px; font-weight: 600; }
+.link-row .link-ctl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.link-row .link-ctl .dlg-input { flex: 1 1 auto; min-width: 0; }
+.link-row .link-desc, .link-row .dlg-note { grid-column: 2; margin: 0; }
+.link-row .link-desc { color: var(--muted); font-size: 13px; }
+
+.switch {
+  position: relative; display: inline-flex; align-items: center; min-height: 32px; padding: 4px 0 4px 50px;
+  border: 0; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; cursor: pointer; border-radius: 6px;
+}
+.switch::before {
+  content: ""; position: absolute; left: 0; top: 50%; width: 38px; height: 22px; margin-top: -11px; border-radius: 999px;
+  background: var(--line); transition: background .15s ease;
+}
+.switch::after {
+  content: ""; position: absolute; left: 3px; top: 50%; width: 16px; height: 16px; margin-top: -8px; border-radius: 50%;
+  background: var(--panel); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: left .15s ease;
+}
+.switch[aria-checked="true"]::before { background: var(--visited-ink); }
+.switch[aria-checked="true"]::after { left: 19px; }
+.switch[disabled] { opacity: .5; cursor: default; }
+.share-confirm { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--rule); background: var(--panel-2); }
+.share-confirm[hidden] { display: none; }
+.share-confirm p { margin: 0; font-size: 13.5px; }
+
+/* ---------- view-page banner extras ---------- */
+.banner .banner-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--visited-tint); color: var(--visited-ink); vertical-align: 1px;
+}
+.banner .banner-sub { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--muted); }
+.banner .banner-sub[hidden] { display: none; }
+
+/* ---------- phones ---------- */
+@media (max-width: 640px) {
+  .mark-seg { top: 8px; left: 8px; }
+  .mark-seg button { min-height: 40px; padding: 5px 10px; }
+  #style-seg { flex-wrap: wrap; }
+  .toast .toast-act::after { inset: -11px -10px; }
+  .chip.want { padding: 0.5px 6.5px 0.5px 7.5px; }
+
+  dialog.place-panel {
+    width: 100%; max-width: 100%; margin: auto 0 0; max-height: 80dvh;
+    border-radius: 14px 14px 0 0; border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  dialog.place-panel[open] { animation: sheet-up .22s ease-out; }
+  .place-panel .dlg { padding: 14px 14px 16px; }
+  .status-seg button, .seg button[role="radio"] { min-height: 40px; }
+  .stars .star { width: 40px; height: 40px; }
+  .stars .star-none { min-height: 40px; display: inline-flex; align-items: center; }
+  .place-panel textarea.note-input { font-size: 16px; }
+  .place-foot .btn { min-height: 40px; }
+
+  .link-row { grid-template-columns: minmax(0, 1fr); }
+  .link-row .link-desc, .link-row .dlg-note { grid-column: 1; }
+  .link-row .link-ctl { flex-wrap: wrap; }
+  .link-row .link-ctl .dlg-input { flex-basis: 100%; }
+  .link-row .btn { min-height: 40px; }
+  .switch { min-height: 40px; }
+}
+@keyframes sheet-up { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  dialog.place-panel[open] { animation: none; }
+  svg.map .cities, .switch::before, .switch::after { transition: none; }
+  svg.map .city.flash, svg.map .dot.flash { animation: none; }
+}
+
+/* ---------- Windows high contrast / forced colors ---------- */
+@media (forced-colors: active) {
+  svg.map .place.on, svg.map .dot.on, svg.map .city.on { fill: Highlight; }
+  svg.map .want-bg { fill: Canvas; }
+  svg.map .want-line { stroke: Highlight; stroke-opacity: 1; }
+  svg.map .place.want, svg.map .dot.want, svg.map .city.want, svg.map .inset-bg.want { stroke: Highlight; }
+  body.ratings svg.map :is(.place, .dot, .city):is(.on, .unrated):not(.r1, .r2, .r3, .r4, .r5) { stroke: Highlight; }
+  .frame.mode-want { outline-color: Highlight; }
+  .chip { border: 1px solid CanvasText; }
+  .chip.want { border: 1.5px dashed CanvasText; }
+  .legend i, .stat .bar, .mark-seg .sw, .search .results .check { forced-color-adjust: none; }
+  .stars .star svg, .stars-ro .star-ro { stroke: CanvasText; }
+  .stars .star.lit svg, .stars-ro .star-ro.lit, .stars .star:has(input:checked) svg, .stars .star:has(~ .star input:checked) svg { fill: CanvasText; }
+  .stars .star-none:has(input:checked) { border: 2px solid Highlight; }
+  .switch::before { forced-color-adjust: none; background: ButtonText; }
+  .switch::after { forced-color-adjust: none; background: ButtonFace; }
+  .switch[aria-checked="true"]::before { background: Highlight; }
+  .toast .toast-act { color: inherit; }
+}
+
+  /* hidden must win over .seg button { display: inline-flex } */
+  .seg button[hidden] { display: none; }
+  .place-panel.readonly .place-foot { justify-content: flex-end; }
+  /* keep the "+n want to go" line's space when hidden so the map never jumps under a finger */
+  .stat .want-line[hidden] { display: inline-flex; visibility: hidden; }
+  /* Share: "Reset notes link" reads as a quiet text action; empty copy notes take no space */
+  .link-row .link-reset { background: none; border-color: transparent; padding-left: 0; padding-right: 0; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+  .link-row .link-reset:hover { color: var(--ink); background: none; }
+  .link-row .dlg-note:empty { display: none; }

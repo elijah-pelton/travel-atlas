@@ -20,7 +20,7 @@
  *   everything else          cache-first from this version's shell cache (css, js, data,
  *                            icons, fonts), network fallback, successful responses stored
  */
-const VERSION = 'c7fbfa9b0d';
+const VERSION = '2f12c3046f';
 const SHELL_CACHE = 'atlas-shell-' + VERSION;
 const TERRAIN_CACHE = 'atlas-terrain';
 const LEGACY_TERRAIN_PREFIX = 'atlas-terrain-';   // old per-version terrain caches
@@ -30,12 +30,18 @@ const PRECACHE = [
   './',
   './index.html',
   './css/app.css',
+  './css/features.css',
   './css/fonts.css',
   './js/app.js',
+  './js/cities.js',
+  './js/ratings.js',
+  './js/places-panel.js',
+  './js/store.js',
   './js/accent.js',
   './js/vendor/qrcode.js',
   './data/na.json',
   './data/world.json',
+  './data/cities.json',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',

@@ -20,11 +20,13 @@ async function openApp(page) {
   await page.goto('./');
   await page.waitForSelector('#frame-na svg.map[data-map="na"]');
   await page.waitForSelector('#frame-world svg.map[data-map="world"]');
-  await expect(page.locator('.stats .stat')).toHaveCount(5);
+  // feature modules (<script defer>) finish wiring after the maps: wait so the layout is final
+  await page.waitForFunction(() => window.Atlas && (!document.querySelector('script[src$="js/cities.js"]') || (window.AtlasCities && window.AtlasCities.ready)));
+  await expect(page.locator('.stats .stat:not(.city-stat)')).toHaveCount(5);
 }
 
 async function counters(page) {
-  return page.$$eval('.stats .stat .num', els => els.map(e => e.textContent.replace(/\s+/g, '')));
+  return page.$$eval('.stats .stat:not(.city-stat) .num', els => els.map(e => e.textContent.replace(/\s+/g, '')));
 }
 
 /** An on-screen point that really hits `sel` (or another node with its data-id). */
@@ -129,16 +131,21 @@ test('fix1 a second tab repaints from storage, and hiding/closing a stale tab ne
   expect(await a.title()).toContain('Ana’s Travel Atlas');
 
   // make A genuinely stale: a write from A's own document never reaches A's storage listener
-  await a.evaluate(() => localStorage.setItem('travel-atlas:v1', JSON.stringify({ FRA: true, SGP: true, JPN: true })));
+  await a.evaluate(() => {
+    const d = JSON.parse(localStorage.getItem('travel-atlas:v2'));
+    d.places.JPN = [1, Date.now()];
+    localStorage.setItem('travel-atlas:v2', JSON.stringify(d));
+  });
   expect(await isMarked(a, 'JPN')).toBe(false);          // A's in-memory set is now behind storage
   await expect.poll(() => isMarked(b, 'JPN')).toBe(true); // B adopted it
 
   // hiding and closing the stale tab must not write its old set back
+  const v2Been = async p => { const d = JSON.parse(await stored(p, 'travel-atlas:v2')); return Object.keys(d.places).filter(k => d.places[k][0] === 1).sort(); };
   await hidePage(a);
-  expect(JSON.parse(await stored(b))).toEqual({ FRA: true, SGP: true, JPN: true });
+  expect(await v2Been(b)).toEqual(['FRA', 'JPN', 'SGP']);
   await a.close({ runBeforeUnload: true });
   await b.waitForTimeout(200);
-  expect(JSON.parse(await stored(b))).toEqual({ FRA: true, SGP: true, JPN: true });
+  expect(await v2Been(b)).toEqual(['FRA', 'JPN', 'SGP']);
   expect(await stored(b, 'travel-atlas:owner')).toBe('Ana');
 
   // B's marks survive a reload
@@ -161,7 +168,7 @@ test('fix1 unreadable stored marks are kept aside, not overwritten at startup', 
   await page.evaluate(() => { localStorage.clear(); localStorage.setItem('travel-atlas:v1', '{oops not json'); });
   await openApp(page);
   await expect(page.locator('#status')).toHaveText('Saved on this device');
-  expect(await stored(page)).toBe('{oops not json');               // startup probe didn't overwrite it
+  // the v2 migration parks the unreadable value under :v1.bad before :v1 becomes a mirror again
   expect(await stored(page, 'travel-atlas:v1.bad')).toBe('{oops not json');
   await clickPlace(page, FRA);
   expect(JSON.parse(await stored(page))).toEqual({ FRA: true });
@@ -192,7 +199,7 @@ test('fix3 five marks with no backup shows "Back up your marks"; copying the cod
   // clicking the pill opens Backup; Copy code clears the reminder
   await pill.click();
   await expect(page.locator('#backup')).toBeVisible();
-  expect(await page.inputValue('#code-out')).toBe('atlas1:DEU,FRA,ITA,JPN,SGP');
+  expect(await page.inputValue('#code-out')).toBe('atlas2:b=DEU,FRA,ITA,JPN,SGP');
   await page.click('#copy-code');
   await expect(page.locator('#copy-note')).toHaveText(/Copied/);
   await expect(pill).toHaveText('Saved on this device');
@@ -250,7 +257,7 @@ test('fix4 phone: tapping near the Singapore dot marks it; small finger wobble i
   expect(under).toEqual({ cls: 'dot-hit', id: 'SGP' });
   await page.touchscreen.tap(tx, ty);
   await expect.poll(() => isMarked(page, 'SGP')).toBe(true);
-  await expect(page.locator('#toast-world')).toHaveText('Singapore — been there');
+  await expect(page.locator('#toast-world .toast-msg')).toHaveText('Singapore: been there');
   // the hit circle is never painted, even when its place is marked
   const paint = await page.$eval('svg.map[data-map="world"] circle.dot-hit[data-id="SGP"]', h => {
     const cs = getComputedStyle(h);
@@ -308,12 +315,12 @@ test('fix5 Replace is unchecked on reopen, and Undo restores the previous marks 
   await restoreCode(page, 'atlas1:US-CO,FRA,SGP');
   await expect(page.locator('#restore-note')).toHaveText(/Added 3 new places/);
   const before = await page.inputValue('#code-out');
-  expect(before).toBe('atlas1:FRA,SGP,US-CO');
+  expect(before).toBe('atlas2:b=FRA,SGP,US-CO');
 
   await restoreCode(page, 'atlas1:JPN,ZZZ', { replace: true });
   const note = page.locator('#restore-note');
   await expect(note).toHaveText(/^Replaced with 1 place \(1 unrecognized entry skipped\) · Undo$/);
-  expect(await page.inputValue('#code-out')).toBe('atlas1:JPN');
+  expect(await page.inputValue('#code-out')).toBe('atlas2:b=JPN');
   expect(await counters(page)).toEqual(['0/50', '0/6', '0/13', '1/196', '0/45']);
 
   await note.getByRole('button', { name: 'Undo' }).click();
@@ -322,6 +329,11 @@ test('fix5 Replace is unchecked on reopen, and Undo restores the previous marks 
   for (const id of ['US-CO', 'FRA', 'SGP']) expect(await isMarked(page, id), id).toBe(true);
   expect(await isMarked(page, 'JPN')).toBe(false);
   expect(JSON.parse(await stored(page))).toEqual({ 'US-CO': true, FRA: true, SGP: true });
+  // an empty parse never replaces anything
+  await page.check('#restore-replace');
+  await restoreCode(page, 'atlas1:ZZZ', { replace: false });
+  await expect(note).toHaveText('That doesn’t look like a backup code from this page.');
+  for (const id of ['US-CO', 'FRA', 'SGP']) expect(await isMarked(page, id), id).toBe(true);
 
   // closing and reopening: Replace is back to unchecked
   await closeBackup(page);
@@ -331,7 +343,7 @@ test('fix5 Replace is unchecked on reopen, and Undo restores the previous marks 
   // ... and a restore now adds
   await restoreCode(page, 'atlas1:JPN');
   await expect(note).toHaveText(/Added 1 new place\./);
-  expect(await page.inputValue('#code-out')).toBe('atlas1:FRA,JPN,SGP,US-CO');
+  expect(await page.inputValue('#code-out')).toBe('atlas2:b=FRA,JPN,SGP,US-CO');
 
   await page.reload();
   await openApp(page);
@@ -340,7 +352,7 @@ test('fix5 Replace is unchecked on reopen, and Undo restores the previous marks 
 
 // ---------- 9: screen-reader semantics ----------
 
-test('fix9 search is a combobox with a listbox; toasts are live; chips say Remove', async ({ page }) => {
+test('fix9 search is a combobox with a listbox; toasts are live; chips open details', async ({ page }) => {
   await openApp(page);
   const q = page.locator('#q');
   await expect(q).toHaveAttribute('role', 'combobox');
@@ -371,9 +383,9 @@ test('fix9 search is a combobox with a listbox; toasts are live; chips say Remov
     await expect(page.locator(t)).toHaveAttribute('role', 'status');
     await expect(page.locator(t)).toHaveAttribute('aria-live', 'polite');
   }
-  await expect(page.locator('#toast-world')).toHaveText('Singapore — been there');
-  await expect(page.locator('#list-world .chip')).toHaveAttribute('aria-label', 'Remove Singapore');
-  await expect(page.getByRole('button', { name: 'Remove Singapore' })).toHaveCount(1);
+  await expect(page.locator('#toast-world .toast-msg')).toHaveText('Singapore: been there');
+  await expect(page.locator('#list-world .chip')).toHaveAttribute('aria-label', 'Singapore, been there. Open details.');
+  await expect(page.getByRole('button', { name: 'Singapore, been there. Open details.' })).toHaveCount(1);
 });
 
 // ---------- 6 + 11: phone sizing ----------

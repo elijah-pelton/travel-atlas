@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>features.css preview</title>
+<!-- Static visual check for css/features.css. No inline styles or scripts; the screenshot spec sets
+     data-theme / data-accent on <html>, body.real / body.ratings, and the bar widths (via CSSOM). -->
+<link rel="stylesheet" href="../../css/fonts.css">
+<link rel="stylesheet" href="../../css/app.css">
+<link rel="stylesheet" href="../../css/features.css">
+</head>
+<body>
+<main class="page">
+  <header class="masthead">
+    <div>
+      <h1>features.css preview</h1>
+      <p class="sub">Tap a state, province, country or city to mark it. Use the switch on the map to mark places you want to go. Tap a name in the lists to add a rating or a note.</p>
+    </div>
+    <div class="tools">
+      <div class="seg" role="group" aria-label="Map style" id="style-seg">
+        <button type="button" aria-pressed="false">Flat colors</button>
+        <button type="button" aria-pressed="false">Real map</button>
+        <button type="button" aria-pressed="true">Ratings</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="banner" id="pv-banner-notes"><span>Sam's map with notes · view only<span class="banner-tag">notes</span></span><a href="#">Make your own atlas</a></div>
+  <div class="banner"><span>Sam's map · view only</span><a href="#">Make your own atlas</a><p class="banner-sub">This link no longer shows notes.</p></div>
+
+  <!-- ===== World frame: Want mode, every map state ===== -->
+  <section class="map-section" id="sec-world">
+    <div class="map-head">
+      <div><h2>The world</h2><p class="hint">Want mode, all shape / dot / city states</p></div>
+      <div class="stats" id="stats-world">
+        <div class="stat"><div class="num"><span class="n">12</span><small>/ 196</small></div><div class="label">Countries</div><div class="want-line">+3 want to go</div><div class="bar"><i class="pv-been"></i><i class="want pv-want"></i></div></div>
+        <div class="stat"><div class="num"><span class="n">0</span><small>/ 45</small></div><div class="label">Territories</div><div class="want-line" hidden>+0 want to go</div><div class="bar"><i></i><i class="want"></i></div></div>
+        <div class="stat city-stat"><div class="num"><span class="n">14</span><small>in 6 countries</small></div><div class="label">Cities</div><div class="want-line">+2 want to go</div><div class="bar"><i></i></div></div>
+      </div>
+    </div>
+    <div class="frame mode-want" id="frame-world">
+      <div class="seg mark-seg" role="group" aria-label="What a tap marks">
+        <button type="button" aria-pressed="false"><span class="sw been"></span>Been there</button>
+        <button type="button" aria-pressed="true"><span class="sw want"></span>Want to go</button>
+      </div>
+      <div class="zoom"><button type="button" aria-label="Zoom in">+</button><button type="button" aria-label="Zoom out">−</button><button type="button" aria-label="Reset" disabled>⟲</button></div>
+      <svg class="map" data-map="world" viewBox="0 0 1000 470" role="group" aria-label="Preview shapes">
+        <defs>
+          <pattern id="want-world" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <rect class="want-bg" width="6" height="6"></rect>
+            <line class="want-line" x1="3" y1="0" x2="3" y2="6" stroke-width="2"></line>
+          </pattern>
+        </defs>
+        <rect class="sphere" x="0" y="0" width="1000" height="470"></rect>
+        <rect class="ctx" x="0" y="440" width="1000" height="30"></rect>
+        <!-- row 1: place shapes -->
+        <text class="inset-label" x="20" y="70">places</text>
+        <path class="place" d="M110 30h120l10 40-20 50h-110z"></path>
+        <path class="place on" d="M260 30h120l10 40-20 50h-110z"></path>
+        <path class="place want" d="M410 30h120l10 40-20 50h-110z"></path>
+        <path class="place want flash" d="M560 30h120l10 40-20 50h-110z"></path>
+        <rect class="inset-bg" x="720" y="30" width="70" height="90" rx="4"></rect>
+        <rect class="inset-bg on" x="805" y="30" width="70" height="90" rx="4"></rect>
+        <rect class="inset-bg want" x="890" y="30" width="70" height="90" rx="4"></rect>
+        <text class="inset-label" x="110" y="140">not yet</text>
+        <text class="inset-label" x="260" y="140">been</text>
+        <text class="inset-label" x="410" y="140">want</text>
+        <text class="inset-label" x="560" y="140">want + flash</text>
+        <text class="inset-label" x="720" y="140">inset: -/been/want</text>
+        <!-- row 2: ratings (paint only under body.ratings) -->
+        <text class="inset-label" x="20" y="200">ratings</text>
+        <rect class="place on r1" x="110" y="165" width="90" height="70"></rect>
+        <rect class="place on r2" x="210" y="165" width="90" height="70"></rect>
+        <rect class="place on r3" x="310" y="165" width="90" height="70"></rect>
+        <rect class="place on r4" x="410" y="165" width="90" height="70"></rect>
+        <rect class="place on r5" x="510" y="165" width="90" height="70"></rect>
+        <rect class="place on" x="610" y="165" width="90" height="70"></rect>
+        <rect class="place on unrated" x="710" y="165" width="90" height="70"></rect>
+        <rect class="place want" x="810" y="165" width="90" height="70"></rect>
+        <text class="inset-label" x="110" y="252">1 ★</text>
+        <text class="inset-label" x="210" y="252">2 ★</text>
+        <text class="inset-label" x="310" y="252">3 ★</text>
+        <text class="inset-label" x="410" y="252">4 ★</text>
+        <text class="inset-label" x="510" y="252">5 ★</text>
+        <text class="inset-label" x="610" y="252">on (no r)</text>
+        <text class="inset-label" x="710" y="252">.unrated</text>
+        <text class="inset-label" x="810" y="252">want</text>
+        <!-- row 3: small-place dots -->
+        <text class="inset-label" x="20" y="300">dots</text>
+        <rect class="place" x="100" y="270" width="380" height="60"></rect>
+        <circle class="dot-hit" cx="140" cy="300" r="11"></circle>
+        <circle class="dot" cx="140" cy="300" r="5"></circle>
+        <circle class="dot on" cx="200" cy="300" r="5"></circle>
+        <circle class="dot want" cx="260" cy="300" r="5"></circle>
+        <circle class="dot on r2" cx="320" cy="300" r="5"></circle>
+        <circle class="dot on r5" cx="380" cy="300" r="5"></circle>
+        <circle class="dot on" cx="440" cy="300" r="5"></circle>
+        <!-- row 3b: cities -->
+        <text class="inset-label" x="520" y="300">cities</text>
+        <rect class="place" x="580" y="270" width="400" height="60"></rect>
+        <g class="cities">
+          <circle class="city" cx="610" cy="300" r="2.4"></circle>
+          <circle class="city on" cx="660" cy="300" r="3.2"></circle>
+          <circle class="city want" cx="710" cy="300" r="3.2"></circle>
+          <circle class="city capital" cx="760" cy="300" r="3.6"></circle>
+          <circle class="city on capital" cx="810" cy="300" r="3.6"></circle>
+          <circle class="city on r3" cx="860" cy="300" r="3.2"></circle>
+          <circle class="city on" cx="910" cy="300" r="3.2"></circle>
+        </g>
+        <g class="city-labels">
+          <text class="city-lbl" x="614" y="318" font-size="10">Osaka</text>
+          <text class="city-lbl" x="664" y="318" font-size="10">Kyoto</text>
+          <text class="city-lbl" x="714" y="318" font-size="10">Nara</text>
+          <text class="city-lbl" x="764" y="318" font-size="10">Tokyo</text>
+        </g>
+        <!-- row 4: Real-style labels (only shown under body.real) -->
+        <g class="labels"><text class="lbl" x="170" y="80" font-size="13">PERU</text><text class="lbl" x="470" y="80" font-size="13">CHILE</text></g>
+        <text class="inset-label" x="20" y="390">dense want</text>
+        <path class="place want" d="M100 360h860v60h-860z"></path>
+      </svg>
+      <div class="toast show" role="status">Peru: want to go<button type="button" class="toast-act">Details</button></div>
+    </div>
+    <div class="legend"><span><i class="on"></i>Been there</span><span><i class="want"></i>Want to go</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place: tap the dot</span><span><i class="dot city"></i>City (zoom in to see)</span></div>
+    <div class="legend legend-ratings">
+      <span class="ramp"><span><i class="r1"></i><span class="num">1 ★</span></span><span><i class="r2"></i><span class="num">2 ★</span></span><span><i class="r3"></i><span class="num">3 ★</span></span><span><i class="r4"></i><span class="num">4 ★</span></span><span><i class="r5"></i><span class="num">5 ★</span></span></span>
+      <span><i class="unrated"></i>Been, no rating</span><span><i></i>Not been or want to go</span>
+    </div>
+    <p class="ratings-hint">Rate places from the lists below to color this map.</p>
+    <div class="visited-list">
+      <div class="list-group"><span class="lead">Been there (4):</span><span class="chips"><button type="button" class="chip"><span>Peru</span><span class="ci-rate">★4</span><span class="ci-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h7l3 3v9H3z M10 2v3h3 M5 8h6 M5 11h4" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg></span></button><button type="button" class="chip"><span>Chile</span></button><button type="button" class="chip"><span>Japan</span><span class="ci-rate">★5</span></button><span class="chip"><span>Plain text chip</span></span></span></div>
+      <div class="list-group"><span class="lead">Want to go (2):</span><span class="chips"><button type="button" class="chip want"><span>Iceland</span></button><button type="button" class="chip want"><span>New Zealand</span><span class="ci-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h7l3 3v9H3z M10 2v3h3 M5 8h6 M5 11h4" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg></span></button></span></div>
+      <div class="list-group"><span class="lead">Cities (3):</span><span class="city-group"><span class="grp">Japan:</span><span class="chips"><button type="button" class="chip"><span>Kyoto</span></button><button type="button" class="chip"><span>Osaka</span><span class="ci-rate">★5</span></button><button type="button" class="chip want"><span>Sapporo</span></button></span></span><span class="city-group"><span class="grp">Peru:</span><span class="chips"><button type="button" class="chip"><span>Cusco</span></button></span></span></div>
+      <div class="list-group"><span class="lead">Want to go (0):</span><span class="none">Nothing marked here yet.</span></div>
+    </div>
+  </section>
+
+  <!-- ===== NA frame: Been mode, Already-been toast ===== -->
+  <section class="map-section" id="sec-na">
+    <div class="map-head"><div><h2>United States &amp; Canada</h2><p class="hint">Been mode</p></div></div>
+    <div class="frame" id="frame-na">
+      <div class="seg mark-seg" role="group" aria-label="What a tap marks">
+        <button type="button" aria-pressed="true"><span class="sw been"></span>Been there</button>
+        <button type="button" aria-pressed="false"><span class="sw want"></span>Want to go</button>
+      </div>
+      <div class="zoom"><button type="button" aria-label="Zoom in">+</button><button type="button" aria-label="Zoom out">−</button><button type="button" aria-label="Reset" disabled>⟲</button></div>
+      <svg class="map" data-map="na" viewBox="0 0 1000 300" role="group" aria-label="Preview shapes">
+        <defs>
+          <pattern id="want-na" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <rect class="want-bg" width="6" height="6"></rect>
+            <line class="want-line" x1="3" y1="0" x2="3" y2="6" stroke-width="2"></line>
+          </pattern>
+        </defs>
+        <rect class="water" x="0" y="0" width="1000" height="300"></rect>
+        <path class="place" d="M80 90h200v140h-200z"></path>
+        <path class="place on" d="M280 90h200v140h-200z"></path>
+        <path class="place want" d="M480 90h200v140h-200z"></path>
+        <path class="place" d="M680 90h200v140h-200z"></path>
+      </svg>
+      <div class="toast show" role="status">Already been to Peru<button type="button" class="toast-act">Details</button></div>
+    </div>
+  </section>
+
+  <!-- ===== Details panel, rendered statically (the spec also opens the real dialogs below) ===== -->
+  <section class="map-section">
+    <div class="map-head"><div><h2>Details panel (static)</h2></div></div>
+    <div class="howto place-panel">
+      <form class="dlg" method="dialog">
+        <div class="dlg-head"><h2>Peru</h2><button type="button" class="x" aria-label="Close">×</button></div>
+        <p class="dlg-sub">Country · World</p>
+        <div class="seg status-seg" role="radiogroup" aria-label="Status">
+          <button type="button" role="radio" aria-checked="true">Been there</button>
+          <button type="button" role="radio" aria-checked="false">Want to go</button>
+          <button type="button" role="radio" aria-checked="false">Not marked</button>
+        </div>
+        <div class="pp-field">
+          <div class="dlg-label">Your rating</div>
+          <div class="stars" role="radiogroup" aria-label="Your rating">
+            <label class="star"><input type="radio" name="r-static" value="1" aria-label="1 star"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></label>
+            <label class="star"><input type="radio" name="r-static" value="2" aria-label="2 stars"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></label>
+            <label class="star"><input type="radio" name="r-static" value="3" aria-label="3 stars"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></label>
+            <label class="star"><input type="radio" name="r-static" value="4" aria-label="4 stars" checked><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></label>
+            <label class="star"><input type="radio" name="r-static" value="5" aria-label="5 stars"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></label>
+            <label class="star-none"><input type="radio" name="r-static" value="0">No rating</label>
+          </div>
+        </div>
+        <div class="pp-field">
+          <label class="dlg-label" for="pv-year">When did you go? (optional)</label>
+          <input type="text" id="pv-year" class="dlg-input year-input" inputmode="numeric" maxlength="4" value="2019">
+        </div>
+        <div class="pp-field">
+          <label class="dlg-label" for="pv-note">Note</label>
+          <textarea id="pv-note" class="note-input" maxlength="500" placeholder="What do you remember?">Machu Picchu at dawn, ceviche in Lima.</textarea>
+          <p class="note-count">80 left</p>
+        </div>
+        <div class="place-foot"><p class="place-privacy">Only you see notes and ratings, unless you turn on the notes link in Share.</p><button type="button" class="btn primary">Done</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Share dialog content, rendered statically ===== -->
+  <section class="map-section">
+    <div class="map-head"><div><h2>Share: view links (static)</h2></div></div>
+    <div class="howto">
+      <div class="dlg">
+        <div class="dlg-label">View links</div>
+        <div class="link-rows">
+          <div class="link-row">
+            <span class="link-name">Map only</span>
+            <div class="link-ctl"><input type="text" class="dlg-input mono" readonly value="atlas.elijahpelton.com/map/abc"><button type="button" class="btn primary">Copy</button><button type="button" class="btn">Share</button></div>
+            <p class="link-desc">Places you've been and want to go. No notes or ratings.</p>
+            <p class="dlg-note ok" role="status">Copied</p>
+          </div>
+          <button type="button" class="switch" role="switch" aria-checked="true">Also make a link that shows my notes and ratings</button>
+          <div class="link-row">
+            <span class="link-name">Map with notes</span>
+            <div class="link-ctl"><input type="text" class="dlg-input mono" readonly value="atlas.elijahpelton.com/map/abc#n=k3j2"><button type="button" class="btn primary">Copy</button><button type="button" class="btn">Share</button></div>
+            <p class="link-desc">Anyone with this link can read your notes, ratings and years.</p>
+            <p class="dlg-note" role="status"></p>
+          </div>
+          <button type="button" class="switch" role="switch" aria-checked="false">Also make a link that shows my notes and ratings (off)</button>
+          <div class="share-confirm">
+            <p>Turn off the notes link? Anyone who has it will only see the plain map. Turning it back on makes a new link.</p>
+            <div class="dlg-row"><button type="button" class="btn danger">Turn off</button><button type="button" class="btn">Keep it</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Search rows (been, want, not marked):</p>
+    <div class="search">
+      <input type="search" placeholder="Search" value="Ky">
+      <ul class="results">
+        <li class="on"><span class="check"></span><span class="name">Kyoto</span><span class="where">City · Japan</span></li>
+        <li class="want active"><span class="check"></span><span class="name">Kyrgyzstan</span><span class="where">Country · World</span></li>
+        <li><span class="check"></span><span class="name">Kyiv</span><span class="where">City · Ukraine</span></li>
+        <li class="empty">Cities need one online visit first.</li>
+      </ul>
+    </div>
+  </footer>
+</main>
+
+<!-- real dialogs, opened with showModal() by the screenshot spec -->
+<dialog class="dlg-box place-panel" id="pv-panel" aria-labelledby="pv-panel-title">
+  <form class="dlg" method="dialog">
+    <div class="dlg-head"><h2 id="pv-panel-title">Kyoto</h2><button type="submit" class="x" aria-label="Close">×</button></div>
+    <p class="dlg-sub">City · Japan</p>
+    <div class="seg status-seg" role="radiogroup" aria-label="Status">
+      <button type="button" role="radio" aria-checked="false">Been there</button>
+      <button type="button" role="radio" aria-checked="true">Want to go</button>
+      <button type="button" role="radio" aria-checked="false">Not marked</button>
+    </div>
+    <div class="pp-field">
+      <label class="dlg-label" for="pv-note2">Note</label>
+      <textarea id="pv-note2" class="note-input" maxlength="500" placeholder="Why do you want to go?"></textarea>
+      <p class="note-count" hidden>500 left</p>
+    </div>
+    <div class="place-foot"><p class="place-privacy">Only you see notes and ratings, unless you turn on the notes link in Share.</p><button type="submit" class="btn primary">Done</button></div>
+  </form>
+</dialog>
+<dialog class="dlg-box place-panel readonly" id="pv-panel-ro" aria-labelledby="pv-ro-title">
+  <form class="dlg" method="dialog">
+    <div class="dlg-head"><h2 id="pv-ro-title">Peru</h2><button type="submit" class="x" aria-label="Close">×</button></div>
+    <p class="dlg-sub">Country · World · been there</p>
+    <div class="pp-field"><div class="dlg-label">Sam's rating</div>
+      <span class="stars-ro" role="img" aria-label="4 of 5 stars"><svg class="star-ro lit" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg><svg class="star-ro lit" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg><svg class="star-ro lit" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg><svg class="star-ro lit" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg><svg class="star-ro" viewBox="0 0 24 24"><path d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.3L12 17.1l-5.7 3.1 1.2-6.3-4.7-4.4 6.4-.8z"></path></svg></span>
+    </div>
+    <p class="place-ro">Went in 2019</p>
+    <p class="place-ro none">No note.</p>
+    <div class="place-foot"><span></span><button type="submit" class="btn primary">Done</button></div>
+  </form>
+</dialog>
+</body>
+</html>

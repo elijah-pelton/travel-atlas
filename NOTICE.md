@@ -10,8 +10,9 @@ Natural Earth is in the public domain. This app uses:
 
 - 1:50m cultural and physical vector data (country, state, province and territory outlines)
 - Natural Earth I with Shaded Relief, Water, and Drainages (raster), used for the Real map view
+- 1:10m cultural vector data: populated places (cities), version 5.1.x (pinned to release v5.1.2; source details in `tools/cities-source.json`). Population figures are Natural Earth's estimates and are approximate.
 
-The geometry in `data/` has been projected and simplified for this app. Projections used: Equal Earth for the world map, and Albers equal-area conic for the U.S. and Canada map.
+The geometry in `data/` has been projected and simplified for this app. Projections used: Equal Earth for the world map, and Albers equal-area conic for the U.S. and Canada map. City positions use the same Equal Earth projection as the world map.
 
 ## Fonts
 

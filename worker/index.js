@@ -1,19 +1,38 @@
 // Travel Atlas sync API (contract: docs/SYNC.md).
 // Only /api/* reaches this code (assets.run_worker_first); everything else is the static site.
-import { PLACE_IDS } from './place-ids.js';
+// Validation, merging and response shapes live in worker/model.js (pure, Node-testable).
 import { ipKey } from './net.js';
+import {
+  LIMITS,
+  ModelError,
+  bad,
+  parseCreate,
+  parseSync,
+  parseDoc,
+  serialize,
+  stamp,
+  mergeDoc,
+  mergeOwner,
+  delta,
+  isFull,
+  isNoop,
+  docsNeeded,
+  checkNoteCaps,
+  storageRefuses,
+  mapHead,
+  publicBody,
+  CONVERT_SQL,
+} from './model.js';
 
-const MAX_BODY = 64 * 1024;
-const MAX_PLACES = 400;
-const MAX_NAME = 40;
-const FUTURE_SLACK_MS = 5 * 60 * 1000;
 const ID_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 const READ_CACHE_SECONDS = 15;
-// Control (Cc: NUL, newlines, ...) and format (Cf: bidi overrides like U+202E, zero-width chars).
-const INVISIBLE_RE = /[\p{Cc}\p{Cf}]/gu;
+const CAS_ATTEMPTS = 4; // first try + 3 retries, then 503 busy
 // <slug>-<5 chars>; the slug never starts or ends with "-" and is at most 20 chars.
 const MAP_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?-[abcdefghjkmnpqrstuvwxyz23456789]{5}$/;
-const KEY_RE = /^[A-Za-z0-9_-]{22}$/;
+const KEY_RE = /^[A-Za-z0-9_-]{22}$/; // edit keys and notes tokens: 16 random bytes, base64url
+
+// Everything about a map except its documents (one row read; never sent to clients as is).
+const META_COLS = 'id, name, owner, owner_t, updated, key_hash, rev, pub_rev, priv_rev, notes_token';
 
 const API_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -22,6 +41,8 @@ const API_HEADERS = {
   'Referrer-Policy': 'no-referrer',
 };
 
+class ApiError extends ModelError {}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -29,7 +50,7 @@ export default {
     try {
       return await handleApi(request, env, ctx, url);
     } catch (err) {
-      if (err instanceof ApiError) return error(err.status, err.code, err.message);
+      if (err instanceof ModelError) return error(err.status, err.code, err.message);
       console.error('api error', err && err.stack ? err.stack : err);
       return error(500, 'server_error', 'Something went wrong on the server.');
     }
@@ -56,7 +77,9 @@ async function handleApi(request, env, ctx, url) {
     if (method === 'DELETE') return deleteMap(request, env, url, id);
     return notFound();
   }
+  if (method === 'GET' && parts[3] === 'notes') return getNotes(request, env, ctx, url, id);
   if (method === 'POST' && parts[3] === 'sync') return syncMap(request, env, url, id);
+  if (method === 'POST' && parts[3] === 'notes-link') return notesLink(request, env, url, id);
   if (method === 'POST' && parts[3] === 'reset-key') return resetKey(request, env, url, id);
   return notFound();
 }
@@ -67,37 +90,40 @@ async function createMap(request, env, url) {
   if (ipLimitsOn(env) && !(await allow(env, 'RL_CREATE', clientIp(request)))) return rateLimited();
 
   const body = await readJson(request);
-  const name = checkName(body.name);
-  const owner = body.owner === undefined ? '' : checkOwnerName(body.owner);
-  let ownerT = 0;
-  if (body.ownerT !== undefined) {
-    if (!Number.isSafeInteger(body.ownerT) || body.ownerT < 0) throw bad('ownerT must be an integer ≥ 0.');
-    ownerT = clampT(body.ownerT);
-  }
-  const places = checkPlaces(body.places === undefined ? {} : body.places);
-
-  const editKey = newEditKey();
-  const keyHash = await sha256Hex(editKey);
   const now = Date.now();
-  const slug = slugify(name);
+  const input = parseCreate(body, now);
+  const pub = serialize(stamp(input.places, 1));
+  const privDoc = stamp(input.notes, 1);
+  const priv = serialize(privDoc);
+  checkNoteCaps({}, privDoc, priv, '{}');
+
+  // Storage guard: a new map always grows the database. size_after comes with every D1 result;
+  // `SELECT 1` reads no rows.
+  const probe = await env.DB.prepare('SELECT 1').all();
+  if (storageRefuses(sizeAfter(probe), true)) return storageFull();
+
+  const editKey = newToken();
+  const keyHash = await sha256Hex(editKey);
+  const slug = slugify(input.name);
 
   // Retry on the (very unlikely) chance the random suffix collides with an existing map.
+  // New maps start at rev 1 (rev 0 means "not yet converted from the v1 marks table").
   for (let attempt = 0; attempt < 5; attempt++) {
     const id = `${slug}-${randomSuffix()}`;
-    const stmts = [
-      env.DB.prepare(
-        'INSERT INTO maps (id, name, owner, owner_t, key_hash, created, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)'
-      ).bind(id, name, owner, ownerT, keyHash, now),
-    ];
-    if (Object.keys(places).length) stmts.push(upsertMarks(env, id, places));
     try {
-      await env.DB.batch(stmts);
+      await env.DB.prepare(
+        'INSERT INTO maps (id, name, owner, owner_t, key_hash, created, updated, rev, pub, pub_rev, priv, priv_rev) ' +
+          'VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 1, ?8, 1)'
+      )
+        .bind(id, input.name, input.owner, input.ownerT, keyHash, now, pub, priv)
+        .run();
     } catch (err) {
       if (/UNIQUE|constraint/i.test(String(err && err.message))) continue;
       throw err;
     }
     await purgeMap(url, id); // nothing should be cached for a brand-new id, but be sure
-    const map = { id, name, owner, ownerT, updated: now, places: sortPlaces(places) };
+    const row = { id, name: input.name, owner: input.owner, owner_t: input.ownerT, updated: now, rev: 1, notes_token: null };
+    const map = syncBody(row, delta(JSON.parse(pub), null), delta(privDoc, null), true, input.dropped);
     return json(201, { id, editKey, map });
   }
   throw new Error('could not allocate a unique map id');
@@ -106,62 +132,182 @@ async function createMap(request, env, url) {
 // Reads are cached at the edge (this Cloudflare location's Cache API, server side only) for
 // 15 s, so a popular view link costs at most ~4 D1 reads a minute per location. Writes purge the
 // entry, so an editor's next read is fresh. Browsers still get Cache-Control: no-store.
+// Never contains notes or anything about the notes link.
 async function getMap(request, env, ctx, url, id) {
   const cacheKey = mapCacheKey(url, id);
   const hit = await cacheMatch(cacheKey);
   if (hit) return json(200, hit, { 'X-Atlas-Cache': 'hit' }, true);
 
   if (ipLimitsOn(env) && !(await allow(env, 'RL_READ', clientIp(request)))) return rateLimited();
-  const map = await loadMap(env, id);
-  if (!map) return notFound();
-  const body = JSON.stringify(map);
+  const cols = 'id, name, owner, owner_t, updated, rev, pub';
+  let row = await env.DB.prepare(`SELECT ${cols} FROM maps WHERE id = ?1`).bind(id).first();
+  if (row && row.rev === 0) row = await convert(env, id, cols);
+  if (!row) return notFound();
+  const body = publicBody(row);
   ctx.waitUntil(cachePut(cacheKey, body));
   return json(200, body, { 'X-Atlas-Cache': 'miss' }, true);
 }
 
+// The notes view link: `Authorization: Bearer <notesToken>`. Same shape as GET plus `notes`.
+// Cached like GET, under a key derived from SHA-256(token), so only that token's holder can hit
+// it. Wrong, malformed or disabled tokens are 401 and count toward RL_BADKEY (per IP + map).
+async function getNotes(request, env, ctx, url, id) {
+  const token = bearer(request);
+  const tokenHash = await sha256Hex(token); // hash even malformed tokens: same work either way
+  const wellFormed = KEY_RE.test(token);
+  const cacheKey = notesCacheKey(url, id, tokenHash);
+  if (wellFormed) {
+    const hit = await cacheMatch(cacheKey);
+    if (hit) return json(200, hit, { 'X-Atlas-Cache': 'hit' }, true);
+  }
+
+  const ip = clientIp(request);
+  if (ipLimitsOn(env) && !(await allow(env, 'RL_READ', ip))) return rateLimited();
+  const cols = 'id, name, owner, owner_t, updated, rev, pub, priv, notes_token';
+  let row = await env.DB.prepare(`SELECT ${cols} FROM maps WHERE id = ?1`).bind(id).first();
+  if (!row) return notFound();
+  // Compare SHA-256 digests (always 64 hex chars) in constant time; a NULL token never matches.
+  const ok = wellFormed && row.notes_token !== null && timingSafeEqualStr(tokenHash, await sha256Hex(row.notes_token));
+  if (!ok) {
+    if (!(await allow(env, 'RL_BADKEY', `${ip}|${id}`))) return rateLimited();
+    return error(401, 'bad_key', 'The notes link is not valid for this map.');
+  }
+  if (row.rev === 0) {
+    row = await convert(env, id, cols);
+    if (!row) return notFound();
+  }
+  const body = publicBody(row, true);
+  ctx.waitUntil(cachePut(cacheKey, body));
+  return json(200, body, { 'X-Atlas-Cache': 'miss' }, true);
+}
+
+// Sync: merge what the client sent, answer with what it has not seen (entries with rev > since,
+// or everything without `since`). Steps (D1 cost in docs/SYNC.md):
+// meta row (in authorize) -> convert if rev = 0 -> no-op shortcut -> read the needed documents
+// -> merge -> compare-and-swap UPDATE on rev (re-read and retry, then 503 busy) -> purge caches.
 async function syncMap(request, env, url, id) {
   const auth = await authorize(request, env, id);
   if (auth instanceof Response) return auth;
 
   const body = await readJson(request);
-  const places = checkPlaces(body.places === undefined ? {} : body.places);
-  let owner = null;
-  if (body.owner !== undefined) {
-    if (!Array.isArray(body.owner) || body.owner.length !== 2) throw bad('owner must be [name, t].');
-    owner = [checkOwnerName(body.owner[0]), checkT(body.owner[1], 'owner t')];
+  const now = Date.now();
+  const input = parseSync(body, now);
+  const { since } = input;
+  const hasPlaces = Object.keys(input.places).length > 0;
+  const hasNotes = Object.keys(input.notes).length > 0;
+
+  let meta = auth.row;
+  if (meta.rev === 0) {
+    meta = await convert(env, id, META_COLS);
+    if (!meta) return gone(url, id, null);
+    if (!timingSafeEqualStr(meta.key_hash, auth.row.key_hash)) return keyReplaced();
   }
 
-  // One batch = one transaction. Every write re-checks the key hash, so a concurrent
-  // reset-key or delete between the auth read and this batch cannot slip a write in; the
-  // final key check (same transaction) then tells the client its key stopped working.
-  // A no-op sync (every t <= stored t, owner not newer) writes 0 rows: the upsert and
-  // UPDATEs are guarded, so it costs only reads (see "D1 cost per request" in docs/SYNC.md).
-  const now = Date.now();
-  const stmts = [];
-  if (Object.keys(places).length) {
-    stmts.push(upsertMarks(env, id, places, auth.keyHash));
-    // changes() = rows the upsert above actually inserted or updated (older t's change nothing).
-    stmts.push(env.DB.prepare('UPDATE maps SET updated = ?2 WHERE id = ?1 AND changes() > 0').bind(id, now));
+  // Nothing sent that could change anything, and the client is already at this rev: answer
+  // from the meta row alone (1 row read for the whole request, no document parsed).
+  if (isNoop({ since, rev: meta.rev, ownerT: meta.owner_t, input })) {
+    return json(200, syncBody(meta, {}, {}, false, input.dropped), { 'X-Atlas-Read': 'meta' });
   }
-  if (owner) {
-    stmts.push(
-      env.DB.prepare(
-        'UPDATE maps SET owner = ?2, owner_t = ?3, updated = ?4 WHERE id = ?1 AND key_hash = ?5 AND ?3 > owner_t'
-      ).bind(id, owner[0], owner[1], now, auth.keyHash)
+
+  let need = docsNeeded({ since, rev: meta.rev, pubRev: meta.pub_rev, privRev: meta.priv_rev, hasPlaces, hasNotes });
+  for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+    const cols = [META_COLS, need.pub ? 'pub' : null, need.priv ? 'priv' : null].filter(Boolean).join(', ');
+    const res = await env.DB.prepare(`SELECT ${cols} FROM maps WHERE id = ?1`).bind(id).all();
+    let row = res.results && res.results[0];
+    if (!row) return gone(url, id, meta.notes_token); // deleted while this sync ran
+    if (!timingSafeEqualStr(row.key_hash, auth.row.key_hash)) return keyReplaced(); // reset raced this sync
+    if (row.rev === 0) {
+      // Only possible if the row was rolled back to v1 meanwhile: convert again and re-read.
+      await convert(env, id, 'id');
+      need = { pub: true, priv: true };
+      continue;
+    }
+    // A write landed between the meta read and this one and touched a document we skipped.
+    const now2 = docsNeeded({ since, rev: row.rev, pubRev: row.pub_rev, privRev: row.priv_rev, hasPlaces, hasNotes });
+    if ((now2.pub && !need.pub) || (now2.priv && !need.priv)) {
+      need = { pub: need.pub || now2.pub, priv: need.priv || now2.priv };
+      continue;
+    }
+
+    const pub = need.pub ? parseDoc(row.pub) : null;
+    const priv = need.priv ? parseDoc(row.priv) : null;
+    const newRev = row.rev + 1;
+    const p = hasPlaces ? mergeDoc(pub, input.places, newRev) : { doc: pub, changed: 0 };
+    const n = hasNotes ? mergeDoc(priv, input.notes, newRev) : { doc: priv, changed: 0 };
+    const o = mergeOwner(row.owner, row.owner_t, input.owner);
+    const read = ['meta', need.pub && 'pub', need.priv && 'priv'].filter(Boolean).join(',');
+    const full = isFull(since, row.rev);
+
+    if (!p.changed && !n.changed && !o.changed) {
+      const out = syncBody(row, pub ? delta(pub, full ? null : since) : {}, priv ? delta(priv, full ? null : since) : {}, full, input.dropped);
+      return json(200, out, { 'X-Atlas-Read': read });
+    }
+
+    const sets = ['rev = ?3', 'updated = ?4'];
+    const args = [id, row.rev, newRev, now, auth.row.key_hash];
+    let grows = false;
+    if (p.changed) {
+      const text = serialize(p.doc);
+      grows = grows || text.length > row.pub.length;
+      args.push(text);
+      sets.push(`pub = ?${args.length}`, 'pub_rev = ?3');
+    }
+    if (n.changed) {
+      const text = serialize(n.doc);
+      checkNoteCaps(priv, n.doc, text, row.priv);
+      grows = grows || text.length > row.priv.length;
+      args.push(text);
+      sets.push(`priv = ?${args.length}`, 'priv_rev = ?3');
+    }
+    if (o.changed) {
+      args.push(o.owner, o.ownerT);
+      sets.push(`owner = ?${args.length - 1}`, `owner_t = ?${args.length}`);
+    }
+    // Shrinking (or same-size) writes are always allowed, so a full database can still be tidied.
+    if (storageRefuses(sizeAfter(res), grows)) return storageFull();
+
+    // Compare-and-swap: lands only if nobody else wrote since our read and the key still holds.
+    const upd = await env.DB.prepare(`UPDATE maps SET ${sets.join(', ')} WHERE id = ?1 AND rev = ?2 AND key_hash = ?5`)
+      .bind(...args)
+      .run();
+    if (!upd.meta || upd.meta.changes !== 1) {
+      need = { pub: need.pub || hasPlaces, priv: need.priv || hasNotes };
+      continue; // someone else wrote first (or the key/map went away): re-read and decide again
+    }
+
+    await Promise.all([purgeMap(url, id), purgeNotes(url, id, row.notes_token)]);
+    const merged = { ...row, rev: newRev, updated: now, owner: o.owner, owner_t: o.ownerT };
+    const out = syncBody(
+      merged,
+      p.doc ? delta(p.doc, full ? null : since) : {},
+      n.doc ? delta(n.doc, full ? null : since) : {},
+      full,
+      input.dropped
     );
+    return json(200, out, { 'X-Atlas-Read': read });
   }
-  stmts.push(...selectMap(env, id));
-  const results = await env.DB.batch(stmts);
-  const row = results[results.length - 2].results[0];
-  if (!row) {
-    await purgeMap(url, id);
-    return notFound(); // deleted between the auth check and the batch
-  }
-  if (!timingSafeEqualStr(row.key_hash, auth.keyHash)) {
-    return error(401, 'bad_key', 'The edit key is not valid for this map.'); // reset raced this sync
-  }
-  await purgeMap(url, id);
-  return json(200, mapFromRows(row, results[results.length - 1].results));
+  return error(503, 'busy', 'The map is busy with other changes. Try again in a moment.', { 'Retry-After': '2' });
+}
+
+// Turns the notes view link on (keeps an existing token), off, or replaces it (reset).
+// Editing devices learn the token from `notesToken` in sync responses.
+async function notesLink(request, env, url, id) {
+  const auth = await authorize(request, env, id);
+  if (auth instanceof Response) return auth;
+  const body = await readJson(request);
+  const action = body.action;
+  if (action !== 'on' && action !== 'off' && action !== 'reset') throw bad('action must be "on", "off" or "reset".');
+
+  const value = action === 'off' ? 'NULL' : action === 'on' ? 'coalesce(notes_token, ?3)' : '?3';
+  const stmt = env.DB.prepare(
+    `UPDATE maps SET notes_token = ${value} WHERE id = ?1 AND key_hash = ?2 RETURNING notes_token`
+  );
+  const res = await (action === 'off' ? stmt.bind(id, auth.row.key_hash) : stmt.bind(id, auth.row.key_hash, newToken())).all();
+  const row = res.results && res.results[0];
+  if (!row) return keyReplaced(); // a reset-key or delete got there first
+  const token = row.notes_token === undefined ? null : row.notes_token;
+  if (auth.row.notes_token && auth.row.notes_token !== token) await purgeNotes(url, id, auth.row.notes_token);
+  return json(200, { notesToken: token });
 }
 
 async function resetKey(request, env, url, id) {
@@ -169,11 +315,11 @@ async function resetKey(request, env, url, id) {
   if (auth instanceof Response) return auth;
   await readJson(request, { allowEmpty: true }); // body is `{}`; still enforces type and size
 
-  const editKey = newEditKey();
+  const editKey = newToken();
   const res = await env.DB.prepare('UPDATE maps SET key_hash = ?3 WHERE id = ?1 AND key_hash = ?2')
-    .bind(id, auth.keyHash, await sha256Hex(editKey))
+    .bind(id, auth.row.key_hash, await sha256Hex(editKey))
     .run();
-  if (!res.meta || res.meta.changes !== 1) return error(401, 'bad_key', 'The edit key is not valid for this map.');
+  if (!res.meta || res.meta.changes !== 1) return keyReplaced();
   await purgeMap(url, id);
   return json(200, { editKey });
 }
@@ -183,21 +329,49 @@ async function deleteMap(request, env, url, id) {
   if (auth instanceof Response) return auth;
 
   const results = await env.DB.batch([
+    // Legacy v1 rows (until docs/later/0003_drop_marks.sql).
     env.DB.prepare(
       'DELETE FROM marks WHERE map_id = ?1 AND EXISTS (SELECT 1 FROM maps WHERE id = ?1 AND key_hash = ?2)'
-    ).bind(id, auth.keyHash),
-    env.DB.prepare('DELETE FROM maps WHERE id = ?1 AND key_hash = ?2').bind(id, auth.keyHash),
+    ).bind(id, auth.row.key_hash),
+    env.DB.prepare('DELETE FROM maps WHERE id = ?1 AND key_hash = ?2').bind(id, auth.row.key_hash),
   ]);
   // 0 rows deleted = a reset-key or another delete got there first: the key no longer works.
   const deleted = results[1] && results[1].meta ? results[1].meta.changes : 0;
-  if (deleted !== 1) return error(401, 'bad_key', 'The edit key is not valid for this map.');
-  await purgeMap(url, id);
+  if (deleted !== 1) return keyReplaced();
+  await Promise.all([purgeMap(url, id), purgeNotes(url, id, auth.row.notes_token)]);
   return new Response(null, { status: 204, headers: securityHeaders() });
+}
+
+// ---------- map rows ----------
+
+// Converts a v1 map (rev = 0, places in `marks`) and re-reads `cols`, in one batch (one
+// transaction). Returns the row, or null if the map is gone.
+async function convert(env, id, cols) {
+  const [, sel] = await env.DB.batch([
+    env.DB.prepare(CONVERT_SQL).bind(id),
+    env.DB.prepare(`SELECT ${cols} FROM maps WHERE id = ?1`).bind(id),
+  ]);
+  return (sel.results && sel.results[0]) || null;
+}
+
+function syncBody(row, places, notes, full, dropped) {
+  return { ...mapHead(row), places, notes, notesToken: row.notes_token ?? null, full, dropped };
+}
+
+function sizeAfter(result) {
+  const v = result && result.meta ? result.meta.size_after : undefined;
+  if (typeof v !== 'number') warnOnce('size_after', 'D1 result meta has no size_after; storage guard is off');
+  return v;
+}
+
+async function gone(url, id, notesToken) {
+  await Promise.all([purgeMap(url, id), purgeNotes(url, id, notesToken)]);
+  return notFound();
 }
 
 // ---------- auth + rate limits ----------
 
-// Returns { keyHash } for a valid key, or the error Response to send.
+// Returns { row } (META_COLS) for a valid edit key, or the error Response to send.
 // Order: the per-IP write budget first (it caps every write attempt, key or no key, before any
 // D1 read); then the key; then the per-map write budget, counted only for a correct key so
 // strangers guessing keys cannot use up a map's budget. Bad keys are counted per IP+map: after
@@ -207,11 +381,10 @@ async function authorize(request, env, id) {
   const ip = clientIp(request);
   if (ipLimitsOn(env) && !(await allow(env, 'RL_IPWRITE', ip))) return rateLimited();
 
-  const row = await env.DB.prepare('SELECT key_hash FROM maps WHERE id = ?1').bind(id).first();
+  const row = await env.DB.prepare(`SELECT ${META_COLS} FROM maps WHERE id = ?1`).bind(id).first();
   if (!row) return notFound();
 
-  const m = /^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization') || '');
-  const key = m ? m[1] : '';
+  const key = bearer(request);
   const presented = await sha256Hex(key); // hash even malformed keys: same work either way
   const ok = KEY_RE.test(key) && timingSafeEqualStr(presented, row.key_hash);
 
@@ -221,7 +394,12 @@ async function authorize(request, env, id) {
   }
 
   if (!(await allow(env, 'RL_WRITE', id))) return rateLimited();
-  return { keyHash: row.key_hash };
+  return { row };
+}
+
+function bearer(request) {
+  const m = /^Bearer ([^\s]+)$/.exec(request.headers.get('Authorization') || '');
+  return m ? m[1] : '';
 }
 
 // "0" (only `npm run dev:test`) skips the limits keyed by IP alone, since a local test suite
@@ -232,23 +410,23 @@ function ipLimitsOn(env) {
 
 // Fail open when a binding is missing or errors: limits are abuse protection, not correctness.
 // But say so in the logs, once per binding per isolate, so a broken limiter is noticed.
-const limiterWarned = new Set();
-function warnLimiter(name, why) {
-  if (limiterWarned.has(name)) return;
-  limiterWarned.add(name);
-  console.error(`rate limiter ${name} ${why}; failing open`);
+const warned = new Set();
+function warnOnce(name, why) {
+  if (warned.has(name)) return;
+  warned.add(name);
+  console.error(`${name}: ${why}`);
 }
 async function allow(env, name, key) {
   const binding = env[name];
   if (!binding || typeof binding.limit !== 'function') {
-    warnLimiter(name, 'binding is missing');
+    warnOnce(name, 'rate limiter binding is missing; failing open');
     return true;
   }
   try {
     const { success } = await binding.limit({ key });
     return success !== false;
   } catch (err) {
-    warnLimiter(name, `threw ${err && err.message ? err.message : err}`);
+    warnOnce(name, `rate limiter threw ${err && err.message ? err.message : err}; failing open`);
     return true;
   }
 }
@@ -263,6 +441,10 @@ function clientIp(request) {
 // The canonical public URL of a map: no query string, no auth, so every viewer shares one entry.
 function mapCacheKey(url, id) {
   return `${url.origin}/api/maps/${id}`;
+}
+// Notes responses: one entry per token, keyed by its SHA-256 (the token never appears in a key).
+function notesCacheKey(url, id, tokenHash) {
+  return `${url.origin}/api/maps/${id}/notes/${tokenHash}`;
 }
 async function cacheMatch(key) {
   try {
@@ -284,70 +466,28 @@ async function cachePut(key, body) {
     /* no cache: every read goes to D1 */
   }
 }
-async function purgeMap(url, id) {
+async function cacheDelete(key) {
   try {
-    await caches.default.delete(mapCacheKey(url, id));
+    await caches.default.delete(key);
   } catch {
     /* nothing to purge */
   }
 }
-
-// ---------- database helpers ----------
-
-// All places in one statement: json_each expands the {placeId: [visited, t]} object into rows.
-// A stored row is only replaced by a strictly newer t (last-writer-wins per place).
-// With keyHash, rows are written only if the map still has that key (see syncMap).
-function upsertMarks(env, id, places, keyHash) {
-  const guard = keyHash
-    ? 'EXISTS (SELECT 1 FROM maps WHERE id = ?1 AND key_hash = ?3)'
-    : 'EXISTS (SELECT 1 FROM maps WHERE id = ?1)';
-  const sql =
-    'INSERT INTO marks (map_id, place_id, visited, t) ' +
-    "SELECT ?1, j.key, json_extract(j.value, '$[0]'), json_extract(j.value, '$[1]') FROM json_each(?2) AS j " +
-    `WHERE ${guard} ` + // a WHERE is also required before ON CONFLICT when inserting from a SELECT
-    'ON CONFLICT (map_id, place_id) DO UPDATE SET visited = excluded.visited, t = excluded.t ' +
-    'WHERE excluded.t > marks.t';
-  const args = [id, JSON.stringify(places)];
-  if (keyHash) args.push(keyHash);
-  return env.DB.prepare(sql).bind(...args);
+function purgeMap(url, id) {
+  return cacheDelete(mapCacheKey(url, id));
+}
+async function purgeNotes(url, id, notesToken) {
+  if (notesToken) await cacheDelete(notesCacheKey(url, id, await sha256Hex(notesToken)));
 }
 
-// key_hash is selected for syncMap's final key check; mapFromRows never copies it out.
-function selectMap(env, id) {
-  return [
-    env.DB.prepare('SELECT id, name, owner, owner_t, updated, key_hash FROM maps WHERE id = ?1').bind(id),
-    env.DB.prepare('SELECT place_id, visited, t FROM marks WHERE map_id = ?1 ORDER BY place_id').bind(id),
-  ];
-}
+// ---------- request body ----------
 
-async function loadMap(env, id) {
-  const [m, p] = await env.DB.batch(selectMap(env, id));
-  return mapFromRows(m.results[0], p.results);
-}
-
-// Public shape only: never key_hash or created.
-function mapFromRows(row, markRows) {
-  if (!row) return null;
-  const places = {};
-  for (const r of markRows || []) places[r.place_id] = [r.visited, r.t];
-  return { id: row.id, name: row.name, owner: row.owner, ownerT: row.owner_t, updated: row.updated, places };
-}
-
-// ---------- validation ----------
-
-class ApiError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-const bad = (message) => new ApiError(400, 'bad_request', message);
-
-// Reads the body with a hard 64 KB cap (Content-Length can be absent or wrong).
+// Reads the body with a hard 128 KB cap (Content-Length can be absent or wrong).
 async function readJson(request, { allowEmpty = false } = {}) {
+  const max = LIMITS.MAX_BODY;
+  const tooLarge = () => new ApiError(413, 'too_large', `Request body is larger than ${max / 1024} KB.`);
   const len = Number(request.headers.get('Content-Length'));
-  if (len > MAX_BODY) throw new ApiError(413, 'too_large', 'Request body is larger than 64 KB.');
+  if (len > max) throw tooLarge();
 
   const chunks = [];
   let size = 0;
@@ -357,9 +497,9 @@ async function readJson(request, { allowEmpty = false } = {}) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_BODY) {
+      if (size > max) {
         reader.cancel().catch(() => {});
-        throw new ApiError(413, 'too_large', 'Request body is larger than 64 KB.');
+        throw tooLarge();
       }
       chunks.push(value);
     }
@@ -384,59 +524,6 @@ async function readJson(request, { allowEmpty = false } = {}) {
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw bad('Body must be a JSON object.');
   return body;
-}
-
-// Invisible characters are removed before trimming and counting: they could hide in a name,
-// reverse how it displays (U+202E), or pad the length check.
-function cleanText(v) {
-  return v.replace(INVISIBLE_RE, '').trim();
-}
-
-function checkName(v) {
-  if (typeof v !== 'string') throw bad('name is required.');
-  const s = cleanText(v);
-  const n = [...s].length;
-  if (n < 1 || n > MAX_NAME) throw bad(`name must be 1–${MAX_NAME} characters.`);
-  return s;
-}
-
-function checkOwnerName(v) {
-  if (typeof v !== 'string') throw bad('owner must be a string.');
-  const s = cleanText(v);
-  if ([...s].length > MAX_NAME) throw bad(`owner must be at most ${MAX_NAME} characters.`);
-  return s;
-}
-
-function checkT(v, what = 't') {
-  if (!Number.isSafeInteger(v) || v <= 0) throw bad(`${what} must be an integer > 0.`);
-  return clampT(v);
-}
-
-// Client clocks can be wrong; a time far in the future would block every later edit.
-function clampT(t) {
-  return Math.min(t, Date.now() + FUTURE_SLACK_MS);
-}
-
-// Returns a fresh object { placeId: [visited, t] } with t clamped.
-function checkPlaces(v) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) throw bad('places must be an object.');
-  const keys = Object.keys(v);
-  if (keys.length > MAX_PLACES) throw bad(`At most ${MAX_PLACES} places per request.`);
-  const out = {};
-  for (const k of keys) {
-    if (!PLACE_IDS.has(k)) throw bad(`Unknown place id: ${k.slice(0, 12).replace(INVISIBLE_RE, '')}`);
-    const e = v[k];
-    if (!Array.isArray(e) || e.length !== 2) throw bad(`places.${k} must be [visited, t].`);
-    if (e[0] !== 0 && e[0] !== 1) throw bad(`places.${k}: visited must be 0 or 1.`);
-    out[k] = [e[0], checkT(e[1], `places.${k}: t`)];
-  }
-  return out;
-}
-
-function sortPlaces(places) {
-  const out = {};
-  for (const k of Object.keys(places).sort()) out[k] = places[k];
-  return out;
 }
 
 // ---------- ids, keys, hashing ----------
@@ -466,8 +553,8 @@ function randomSuffix() {
   return out;
 }
 
-// 16 random bytes, base64url without padding = 22 chars.
-function newEditKey() {
+// Edit keys and notes tokens: 16 random bytes, base64url without padding = 22 chars.
+function newToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -503,6 +590,15 @@ function notFound() {
   return error(404, 'not_found', 'No such map.');
 }
 
+// The key was right when checked, but a concurrent reset-key or delete replaced it before the write.
+function keyReplaced() {
+  return error(401, 'bad_key', 'The edit key is not valid for this map.');
+}
+
 function rateLimited() {
   return error(429, 'rate_limited', 'Too many requests. Try again in a minute.', { 'Retry-After': '60' });
+}
+
+function storageFull() {
+  return error(507, 'storage_full', 'The sync server is full. Your changes are kept on this device.');
 }

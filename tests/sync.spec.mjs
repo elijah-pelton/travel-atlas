@@ -2,6 +2,11 @@
 // Runs against the local Worker (`npm run dev:test`), so the API and the app share one origin.
 // Each "device" is its own browser context (its own localStorage).
 import { test, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------- helpers ----------
 
@@ -391,7 +396,11 @@ test('s10 /#import= adds marks, sets an unset owner, and cleans the address bar'
   await expect(page.locator('html')).toHaveAttribute('data-accent', 'teal');
   await expect(page.locator('body')).toHaveClass(/\breal\b/);
   expect(JSON.parse(await stored(page, 'travel-atlas:v1'))).toEqual({ JPN: true, 'US-CA': true, FRA: true });
-  expect(Object.keys(JSON.parse(await stored(page, 'travel-atlas:clock'))).sort()).toEqual(['FRA', 'US-CA']);
+  // only the imported places were edited now (JPN keeps its pre-sync t = 1)
+  const v2 = JSON.parse(await stored(page, 'travel-atlas:v2'));
+  expect(Object.keys(v2.places).filter(k => v2.places[k][1] > 1).sort()).toEqual(['FRA', 'US-CA']);
+  expect(v2.places.JPN).toEqual([1, 1]);
+  expect(await stored(page, 'travel-atlas:clock')).toBeNull();
 
   // a second import never removes and never overwrites a name that is already set
   await page.goto('./#import=atlas1:DEU&owner=Someone');
@@ -512,4 +521,232 @@ test('s14 pairing while offline never leaves the key in the address bar and fini
   await expect(b.page.locator('#status')).toHaveText('Synced');
   expect(await isMarked(b.page, 'FRA')).toBe(true);
   await a.ctx.close(); await b.ctx.close();
+});
+
+// ---------- v2: want to go, notes, since/rev deltas, chunking, view links ----------
+
+const v2Doc = page => page.evaluate(() => JSON.parse(localStorage.getItem('travel-atlas:v2') || 'null'));
+
+/** Bodies of the POST /sync requests this page sends (parsed). */
+function watchSyncBodies(page) {
+  const bodies = [];
+  page.on('request', r => {
+    if (r.method() === 'POST' && /\/api\/maps\/[^/]+\/sync$/.test(new URL(r.url()).pathname)) {
+      try { bodies.push(JSON.parse(r.postData() || '{}')); } catch (_) { bodies.push(null); }
+    }
+  });
+  return bodies;
+}
+
+test('s15 want to go and notes reach a second device; the next sync is a delta (since = rev)', async ({ browser, request }, testInfo) => {
+  const a = await newDevice(browser, testInfo);
+  const errs = watchErrors(a.page);
+  const link = await createLink(a.page);
+  await closeShare(a.page);
+  const b = await newDevice(browser, testInfo);
+  await pair(b.page, link);
+  const bodies = watchSyncBodies(a.page);
+
+  // A: Want mode + tap Japan, and a note on France
+  await a.page.click('#frame-world .mark-seg button[data-mode="want"]');
+  await clickPlace(a.page, 'JPN');
+  await a.page.evaluate(() => window.Atlas.setInfo('FRA', { rating: 4, year: 2019, note: 'Croissants' }));
+  await expect.poll(async () => { const m = (await serverMap(request, link.id)).raw; return m && m.places.JPN && m.places.JPN[0]; }).toBe(2);
+  await expect(a.page.locator('#status')).toHaveText('Synced');
+  const l = await storedLink(a.page);
+  expect(Number.isInteger(l.rev)).toBe(true);
+  // every request after the first full one carries the cursor
+  expect(bodies.length).toBeGreaterThan(0);
+  for (const bd of bodies) expect(typeof bd.since, JSON.stringify(bd)).toBe('number');
+  expect(bodies.some(bd => bd.notes && bd.notes.FRA)).toBe(true);
+  // the plain GET never shows notes
+  const plain = (await serverMap(request, link.id)).raw;
+  expect(plain.notes).toBeUndefined();
+  expect(JSON.stringify(plain)).not.toContain('Croissants');
+
+  await pollWith(b.page, () => b.page.evaluate(() => window.Atlas.getStatus('JPN')), 2);
+  await pollWith(b.page, () => b.page.evaluate(() => window.Atlas.getInfo('FRA')), { rating: 4, year: 2019, note: 'Croissants' });
+  expect(await b.page.$eval('svg.map [data-id="JPN"].place', n => n.classList.contains('want'))).toBe(true);
+  await expect(b.page.locator('#list-world .chip.want')).toHaveText(['Japan']);
+  await expect(b.page.locator('#list-world .chip[data-id="FRA"] .ci-rate')).toHaveText('★4');
+  expect(errs, errs.join('\n')).toEqual([]);
+  await a.ctx.close(); await b.ctx.close();
+});
+
+test('s16 an old-format linked device (v1 + clock + ownerT, no rev) upgrades losslessly with one full sync', async ({ browser, request }, testInfo) => {
+  const t0 = Date.now() - 60_000;
+  const res = await request.post('./api/maps', { data: { name: 'Old', owner: 'Old', ownerT: t0 - 5000, places: { DEU: [1, t0 - 5000], ITA: [1, t0 - 5000] } } });
+  expect(res.status()).toBe(201);
+  const { id, editKey } = await res.json();
+  const d = await newDevice(browser, testInfo);
+  const errs = watchErrors(d.page);
+  await d.page.goto('./manifest.webmanifest');
+  await d.page.evaluate(([id, editKey, t0]) => {
+    localStorage.clear();
+    localStorage.setItem('travel-atlas:v1', JSON.stringify({ FRA: true, PER: true }));
+    // PER was marked before sync existed (no clock entry: t = 1); ITA was removed here later than the server's add
+    localStorage.setItem('travel-atlas:clock', JSON.stringify({ FRA: t0, ITA: t0 }));
+    localStorage.setItem('travel-atlas:owner', 'Mo');
+    localStorage.setItem('travel-atlas:ownerT', String(t0));
+    localStorage.setItem('travel-atlas:link', JSON.stringify({ id, editKey, name: 'Old', synced: Date.now() }));
+  }, [id, editKey, t0]);
+  const bodies = watchSyncBodies(d.page);
+  await openApp(d.page);
+  await expect(d.page.locator('#status')).toHaveText('Synced');
+  await expect.poll(async () => (await serverMap(request, id)).visited).toEqual(['DEU', 'FRA', 'PER']);
+  expect((await serverMap(request, id)).owner).toBe('Mo');
+  // the first request was a full send (no since) with every entry
+  expect(bodies[0].since).toBeUndefined();
+  expect(bodies[0].places).toEqual({ FRA: [1, t0], ITA: [0, t0], PER: [1, 1] });
+  const doc = await v2Doc(d.page);
+  expect(doc.places).toMatchObject({ FRA: [1, t0], ITA: [0, t0], PER: [1, 1], DEU: [1, t0 - 5000] });
+  expect(doc.dirty).toEqual({});
+  expect(Number.isInteger((await storedLink(d.page)).rev)).toBe(true);
+  for (const x of ['DEU', 'FRA', 'PER']) expect(await isMarked(d.page, x), x).toBe(true);
+  expect(await isMarked(d.page, 'ITA')).toBe(false);
+  await expect(d.page.locator('h1')).toHaveText('Mo’s Travel Atlas');
+  expect(errs, errs.join('\n')).toEqual([]);
+  await d.ctx.close();
+});
+
+test('s17 view links: the plain link shows want but no notes; the notes link shows notes until it is turned off', async ({ browser, request }, testInfo) => {
+  const a = await newDevice(browser, testInfo);
+  const link = await createLink(a.page);
+  await closeShare(a.page);
+  await a.page.evaluate(() => { window.Atlas.setStatus('JPN', 'want', { quiet: true }); window.Atlas.setInfo('FRA', { rating: 5, note: 'Paris in May' }); });
+  const on = await a.page.evaluate(() => window.Atlas.notesLink('on'));
+  expect(on.ok).toBe(true);
+  expect(on.notesToken).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  const info = await a.page.evaluate(() => window.Atlas.link());
+  expect(info.notesUrl).toBe(new URL(`/map/${link.id}#notes=${on.notesToken}`, appRoot(testInfo)).href);
+  expect((await storedLink(a.page)).notesToken).toBe(on.notesToken);
+  await expect.poll(async () => { const m = (await serverMap(request, link.id)).raw; return m.places.JPN && m.places.JPN[0]; }).toBe(2);
+  await a.page.waitForTimeout(1500);                         // let the notes sync land too
+
+  // plain view: want shows, notes don't, chips are plain text
+  const v = await newDevice(browser, testInfo);
+  const errs = watchErrors(v.page);
+  await openApp(v.page, `./map/${link.id}`);
+  await expect(v.page.locator('#view-banner')).toHaveText('Ana’s map · view only · Make your own atlas');
+  expect(await v.page.evaluate(() => window.Atlas.viewMode)).toBe('plain');
+  await expect.poll(() => v.page.evaluate(() => window.Atlas.getStatus('JPN'))).toBe(2);
+  expect(await v.page.evaluate(() => window.Atlas.getInfo('FRA'))).toBeNull();
+  await expect(v.page.locator('#list-world span.chip.want')).toHaveText(['Japan']);
+  await expect(v.page.locator('#list-world button.chip')).toHaveCount(0);
+  await expect(v.page.locator('.mark-seg').first()).toBeHidden();
+
+  // notes view: read-only notes, chips are buttons that open details
+  await v.page.goto('./manifest.webmanifest');
+  await openApp(v.page, `./map/${link.id}#notes=${on.notesToken}`);
+  await expect(v.page.locator('#view-banner')).toHaveText('Ana’s map with notes · view only · Make your own atlas');
+  expect(v.page.url()).toContain('#notes=' + on.notesToken);   // the visitor's link stays as given
+  await expect(v.page.locator('body')).toHaveClass(/view-notes/);
+  await expect.poll(() => v.page.evaluate(() => window.Atlas.getInfo('FRA'))).toEqual({ rating: 5, year: 0, note: 'Paris in May' });
+  expect(await v.page.evaluate(() => window.Atlas.viewMode)).toBe('notes');
+  await expect(v.page.locator('#list-world button.chip[data-id="FRA"]')).toHaveCount(1);
+  expect(await v.page.evaluate(() => window.Atlas.setInfo('FRA', { note: 'x' }))).toBe(false);
+  expect(await v.page.evaluate(() => window.Atlas.setStatus('DEU', 1))).toBe(false);
+  expect(await stored(v.page, 'travel-atlas:v2')).toBeNull();   // viewing never writes this device's atlas
+
+  // turned off: the same link falls back to the plain map with a note
+  expect((await a.page.evaluate(() => window.Atlas.notesLink('off'))).notesToken).toBeNull();
+  await v.page.goto('./manifest.webmanifest');
+  await openApp(v.page, `./map/${link.id}#notes=${on.notesToken}`);
+  await expect(v.page.locator('#view-banner .banner-sub')).toHaveText('This link no longer shows notes.');
+  await expect(v.page.locator('#view-banner > span')).toHaveText('Ana’s map · view only · Make your own atlas');
+  expect(await v.page.evaluate(() => window.Atlas.viewMode)).toBe('plain');
+  expect(await v.page.evaluate(() => window.Atlas.getInfo('FRA'))).toBeNull();
+  await expect.poll(() => v.page.evaluate(() => window.Atlas.getStatus('JPN'))).toBe(2);
+  expect(errs, errs.join('\n')).toEqual([]);
+
+  // the owner's own device opens its notes link as its own atlas
+  const again = await a.page.evaluate(() => window.Atlas.notesLink('on'));
+  await openApp(a.page, `./map/${link.id}#notes=${again.notesToken}`);
+  expect(await a.page.evaluate(() => window.Atlas.viewMode)).toBe('own');
+  expect(a.page.url()).not.toContain('#notes');
+  await a.ctx.close(); await v.ctx.close();
+});
+
+test('s18 another tab\'s notes and want marks arrive through the :v2 storage event', async ({ context }) => {
+  const a = await context.newPage();
+  await openApp(a);
+  const b = await context.newPage();
+  await openApp(b);
+  await b.evaluate(() => { window.Atlas.setStatus('PER', 2, { quiet: true }); window.Atlas.setInfo('PER', { note: 'Machu Picchu' }); });
+  await expect.poll(() => a.evaluate(() => window.Atlas.getStatus('PER'))).toBe(2);
+  await expect.poll(() => a.evaluate(() => (window.Atlas.getInfo('PER') || {}).note)).toBe('Machu Picchu');
+  await expect(a.locator('#list-world .chip.want')).toHaveText(['Peru✎']);
+});
+
+test('s19 the first full sync of 2,000 city ids goes up in chunks without 413/429 loops', async ({ browser, request }, testInfo) => {
+  const ids = JSON.parse(fs.readFileSync(path.join(REPO, 'data', 'cities-ids.json'), 'utf8')).slice(0, 2000);
+  const d = await newDevice(browser, testInfo);
+  const statuses = [];
+  d.page.on('response', r => { if (/\/api\/maps/.test(r.url())) statuses.push(r.status()); });
+  const bodies = watchSyncBodies(d.page);
+  await d.page.goto('./manifest.webmanifest');
+  await d.page.evaluate(ids => {
+    localStorage.clear();
+    const t = Date.now() - 1000, places = {}, dirty = {};
+    for (const id of ids) { places[id] = [1, t]; dirty['p:' + id] = 1; }
+    places.FRA = [1, t]; dirty['p:FRA'] = 1;
+    localStorage.setItem('travel-atlas:v2', JSON.stringify({ v: 2, places, notes: {}, owner: ['Cy', t], dirty: Object.assign(dirty, { o: 1 }) }));
+  }, ids);
+  await openApp(d.page);
+  await d.page.click('#share-btn');
+  await d.page.fill('#share-name', 'Cy');
+  await d.page.click('#share-create');
+  await expect(d.page.locator('#share-on')).toBeVisible();
+  await expect.poll(async () => { const m = (await serverMap(request, (await storedLink(d.page)).id)).raw; return m ? Object.keys(m.places).length : 0; }, { timeout: 20000 }).toBe(2001);
+  await expect.poll(async () => Number.isInteger((await storedLink(d.page)).rev)).toBe(true);
+  await expect(d.page.locator('#status')).toHaveText('Synced');
+  expect(statuses.filter(s => s === 413 || s === 429)).toEqual([]);
+  expect(bodies.length).toBeLessThanOrEqual(4);
+  for (const bd of bodies) expect(Object.keys(bd.places || {}).length).toBeLessThanOrEqual(1000);
+  expect((await v2Doc(d.page)).dirty).toEqual({});
+  await d.ctx.close();
+});
+
+test('s20 an interrupted full send keeps its progress (link.full) and resumes without starting over', async ({ browser, request }, testInfo) => {
+  const ids = JSON.parse(fs.readFileSync(path.join(REPO, 'data', 'cities-ids.json'), 'utf8')).slice(0, 2500);
+  const res = await request.post('./api/maps', { data: { name: 'Big' } });
+  const { id, editKey } = await res.json();
+  const d = await newDevice(browser, testInfo);
+  await d.page.goto('./manifest.webmanifest');
+  await d.page.evaluate(([ids, id, editKey]) => {
+    localStorage.clear();
+    const t = Date.now() - 1000, places = {}, dirty = {};
+    for (const x of ids) { places[x] = [2, t]; dirty['p:' + x] = 1; }
+    localStorage.setItem('travel-atlas:v2', JSON.stringify({ v: 2, places, notes: {}, owner: ['', 0], dirty }));
+    localStorage.setItem('travel-atlas:link', JSON.stringify({ id, editKey, name: 'Big', synced: Date.now() }));
+  }, [ids, id, editKey]);
+  // the second sync request fails once with 503 busy
+  let n = 0;
+  const sent = [];
+  await d.page.route('**/api/maps/*/sync', async route => {
+    n++;
+    const body = JSON.parse(route.request().postData() || '{}');
+    sent.push({ since: body.since, count: Object.keys(body.places || {}).length, first: Object.keys(body.places || {})[0] });
+    if (n === 2) return route.fulfill({ status: 503, contentType: 'application/json', headers: { 'Retry-After': '2' }, body: '{"error":"busy","message":"busy"}' });
+    return route.continue();
+  });
+  await openApp(d.page);
+  await expect(d.page.locator('#status')).toHaveText('Sync paused · will retry');
+  expect(n).toBe(2);
+  const mid = await storedLink(d.page);
+  expect(mid.rev).toBeUndefined();
+  expect(mid.full).toMatchObject({ done: 1 });
+  await wake(d.page);
+  await expect.poll(async () => Number.isInteger((await storedLink(d.page)).rev), { timeout: 15000 }).toBe(true);
+  await expect(d.page.locator('#status')).toHaveText('Synced');
+  expect((await storedLink(d.page)).full).toBeUndefined();
+  const m = (await serverMap(request, id)).raw;
+  expect(Object.keys(m.places).length).toBe(2500);
+  // chunk 1 (no since), chunk 2 refused, then the resume starts at chunk 2 with the cursor
+  expect(sent[0]).toMatchObject({ since: undefined, count: 1000 });
+  expect(sent[1].count).toBe(1000);
+  expect(sent[2]).toMatchObject({ count: 1000, first: sent[1].first });
+  expect(typeof sent[2].since).toBe('number');
+  expect(sent.reduce((a, s) => a + s.count, 0)).toBeLessThanOrEqual(3500);
+  await d.ctx.close();
 });

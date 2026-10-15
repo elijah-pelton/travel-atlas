@@ -1,0 +1,44 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "tests/fixtures/features-preview.html"
+        ],
+        "createdAt": "2026-10-15T01:33:52.330Z",
+        "reason": "lead decision: test-only preview fixture laying out component samples in demo wrappers; bar width transition is the original seed design kept per brief"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "tests/fixtures/features-preview.html"
+        ],
+        "createdAt": "2026-10-15T01:33:52.361Z",
+        "reason": "lead decision: test-only preview fixture laying out component samples in demo wrappers; bar width transition is the original seed design kept per brief"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "tests/fixtures/features-preview.html"
+        ],
+        "createdAt": "2026-10-15T01:33:52.391Z",
+        "reason": "lead decision: test-only preview fixture laying out component samples in demo wrappers; bar width transition is the original seed design kept per brief"
+      },
+      {
+        "rule": "all-caps-body",
+        "value": "*",
+        "files": [
+          "index.html"
+        ],
+        "createdAt": "2026-10-15T02:30:08.841Z",
+        "reason": "lead decision: only short uppercase labels (.dlg-label section labels, world map country labels) from the original seed design, which the brief says to keep"
+      }
+    ]
+  }
+}

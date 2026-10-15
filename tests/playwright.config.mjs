@@ -6,6 +6,16 @@
 import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+
+// Keep a Mac awake while the suite runs. On battery with the display off, macOS idle-sleeps
+// (Maintenance Sleep / DarkWake, see `pmset -g log`) mid-run: wrangler, Chromium and the test
+// worker are all frozen for minutes, so tests "take" 4–9 minutes and expect.poll / test
+// timeouts fire on wake. `caffeinate -i -w <pid>` blocks idle sleep until this runner exits.
+// Only the main runner process spawns it (workers have TEST_WORKER_INDEX).
+if (process.platform === 'darwin' && !process.env.TEST_WORKER_INDEX && !process.env.PW_NO_CAFFEINATE) {
+  try { spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' }).on('error', () => {}).unref(); } catch (_) {}
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '..');

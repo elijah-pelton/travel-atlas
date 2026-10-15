@@ -28,11 +28,13 @@ async function openApp(page) {
   await page.goto('./');
   await page.waitForSelector('#frame-na svg.map[data-map="na"]');
   await page.waitForSelector('#frame-world svg.map[data-map="world"]');
-  await expect(page.locator('.stats .stat')).toHaveCount(5);
+  // feature modules (<script defer>) finish wiring after the maps: wait so the layout is final
+  await page.waitForFunction(() => window.Atlas && (!document.querySelector('script[src$="js/cities.js"]') || (window.AtlasCities && window.AtlasCities.ready)));
+  await expect(page.locator('.stats .stat:not(.city-stat)')).toHaveCount(5);
 }
 
 async function counters(page) {
-  return page.$$eval('.stats .stat .num', els => els.map(e => e.textContent.replace(/\s+/g, '')));
+  return page.$$eval('.stats .stat:not(.city-stat) .num', els => els.map(e => e.textContent.replace(/\s+/g, '')));
 }
 
 /**
@@ -121,7 +123,7 @@ test('01 loads with no console errors', async ({ page }) => {
 test('02 counters read 0/50 0/6 0/13 0/196 0/45 in order', async ({ page }) => {
   await openApp(page);
   expect(await counters(page)).toEqual(['0/50', '0/6', '0/13', '0/196', '0/45']);
-  const labels = await page.$$eval('.stats .stat .label', els => els.map(e => e.textContent));
+  const labels = await page.$$eval('.stats .stat:not(.city-stat) .label', els => els.map(e => e.textContent));
   expect(labels).toEqual(['U.S. states', 'D.C. & territories', 'Canadian provinces & territories', 'Countries', 'Territories & other places']);
 });
 
@@ -141,6 +143,15 @@ test('03-04 click US-CO, Hawaii inset, FRA, SGP dot; counters + chips; survive r
   expect((await chipNames(page, 'na')).sort()).toEqual(['Colorado', 'Hawaii']);
   expect((await chipNames(page, 'world')).sort()).toEqual(['France', 'Singapore']);
   await expect(page.locator('#list-na .lead')).toHaveText('Been there (2):');
+  // a chip opens details (Atlas 'details' event) instead of clearing the place
+  const opened = await page.evaluate(() => new Promise(res => {
+    const fn = d => { window.Atlas.off('details', fn); res(d.id); };
+    window.Atlas.on('details', fn);
+    document.querySelector('#list-world .chip[data-id="FRA"]').click();
+    setTimeout(() => res(null), 2000);
+  }));
+  expect(opened).toBe('FRA');
+  expect(await isMarked(page, 'FRA')).toBe(true);
 
   await page.reload();
   await openApp(page);
@@ -288,7 +299,7 @@ test('09a backup code round-trip', async ({ page }) => {
   await clickPlace(page, 'svg.map[data-map="world"] circle.dot[data-id="SGP"]');
   await openBackup(page);
   const code = await page.inputValue('#code-out');
-  expect(code).toBe('atlas1:FRA,SGP,US-CO');
+  expect(code).toBe('atlas2:b=FRA,SGP,US-CO');
 
   await clearStorageAndReopen(page);
   expect(await counters(page)).toEqual(['0/50', '0/6', '0/13', '0/196', '0/45']);
@@ -326,10 +337,10 @@ test('09c backup file download + restore round-trip (JSON and .txt)', async ({ p
   const file = testInfo.outputPath(dl.suggestedFilename());
   await dl.saveAs(file);
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-  expect(Object.keys(data).sort()).toEqual(['format', 'marks', 'owner', 'savedAt']);
-  expect(data.format).toBe('atlas1');
+  expect(Object.keys(data).sort()).toEqual(['format', 'owner', 'places', 'savedAt']);
+  expect(data.format).toBe('atlas2');
   expect(data.owner).toBe('Sam');
-  expect(data.marks).toEqual(['FRA', 'US-HI']);
+  expect(data.places).toEqual({ FRA: { status: 'been' }, 'US-HI': { status: 'been' } });
   expect(Number.isNaN(Date.parse(data.savedAt))).toBe(false);
 
   await clearStorageAndReopen(page);

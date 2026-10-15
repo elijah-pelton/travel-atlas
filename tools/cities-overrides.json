@@ -1,0 +1,103 @@
+{
+  "_comment": "Pinned country assignments, keyed by Natural Earth NE_ID; 'w' is the world.json id the city gets, 'name' must match the source NAME, 'why' says why. Our map's polygons decide disputed areas (Crimea, Western Sahara, Kosovo, Somaliland, N. Cyprus follow world.json with no pin). Pins here fix cases where the point-in-polygon answer is wrong only because world.json borders are generalised (1:50m, 0.1-unit precision), plus a few reviewed special cases. make-cities.py prints every remaining polygon-vs-ADM0_A3 disagreement; review new ones and pin them here.",
+  "1159151107": {
+    "name": "Posadas",
+    "w": "ARG",
+    "why": "border artifact: NE point is in ARG; our 1:50m border at 0.1-unit precision is 0.04 units off, so the dot lands in PRY"
+  },
+  "1159135709": {
+    "name": "Basel",
+    "w": "CHE",
+    "why": "border artifact: NE point is in CHE; our 1:50m border at 0.1-unit precision is 0.03 units off, so the dot lands in FRA"
+  },
+  "1159151505": {
+    "name": "Geneva",
+    "w": "CHE",
+    "why": "border artifact: NE point is in CHE; our 1:50m border at 0.1-unit precision is 0.22 units off, so the dot lands in FRA"
+  },
+  "1159141505": {
+    "name": "Kipushi",
+    "w": "COD",
+    "why": "border artifact: NE point is in COD; our 1:50m border at 0.1-unit precision is 0.08 units off, so the dot lands in ZMB"
+  },
+  "1159151003": {
+    "name": "Leticia",
+    "w": "COL",
+    "why": "border artifact: NE point is in COL; our 1:50m border at 0.1-unit precision is 0.01 units off, so the dot lands in BRA"
+  },
+  "1159139587": {
+    "name": "Trieste",
+    "w": "ITA",
+    "why": "border artifact: NE point is in ITA; our 1:50m border at 0.1-unit precision is 0.26 units off, so the dot lands in SVN"
+  },
+  "1159136499": {
+    "name": "Biratnagar",
+    "w": "NPL",
+    "why": "border artifact: NE point is in NPL; our 1:50m border at 0.1-unit precision is 0.06 units off, so the dot lands in IND"
+  },
+  "1159136417": {
+    "name": "Kasur",
+    "w": "PAK",
+    "why": "border artifact: NE point is in PAK; our 1:50m border at 0.1-unit precision is 0.04 units off, so the dot lands in IND"
+  },
+  "1159149715": {
+    "name": "Sinuiju",
+    "w": "PRK",
+    "why": "border artifact: NE point is in PRK; our 1:50m border at 0.1-unit precision is 0.02 units off, so the dot lands in CHN"
+  },
+  "1159136083": {
+    "name": "Pedro Juan Caballero",
+    "w": "PRY",
+    "why": "border artifact: NE point is in PRY; our 1:50m border at 0.1-unit precision is 0.01 units off, so the dot lands in BRA"
+  },
+  "1159149625": {
+    "name": "Blagoveshchensk",
+    "w": "RUS",
+    "why": "border artifact: NE point is in RUS; our 1:50m border at 0.1-unit precision is 0.04 units off, so the dot lands in CHN"
+  },
+  "1159126765": {
+    "name": "Uzhgorod",
+    "w": "UKR",
+    "why": "border artifact: NE point is in UKR; our 1:50m border at 0.1-unit precision is 0.11 units off, so the dot lands in SVK"
+  },
+  "1159149193": {
+    "name": "International Falls",
+    "w": "USA",
+    "why": "border artifact: NE point is in USA; our 1:50m border at 0.1-unit precision is 0.18 units off, so the dot lands in CAN"
+  },
+  "1159133601": {
+    "name": "Niagara Falls",
+    "w": "USA",
+    "why": "border artifact: NE point is in USA; our 1:50m border at 0.1-unit precision is 0.04 units off, so the dot lands in CAN"
+  },
+  "1159146319": {
+    "name": "Termiz",
+    "w": "UZB",
+    "why": "border artifact: NE point is in UZB; our 1:50m border at 0.1-unit precision is 0.04 units off, so the dot lands in AFG"
+  },
+  "1159149305": {
+    "name": "Puerto Ayacucho",
+    "w": "VEN",
+    "why": "border artifact: NE point is in VEN; our 1:50m border at 0.1-unit precision is 0.02 units off, so the dot lands in COL"
+  },
+  "1159149439": {
+    "name": "Kaédi",
+    "w": "MRT",
+    "why": "NE ADM0_A3 says SEN but Kaédi is on the Mauritanian bank of the Senegal river; our MRT polygon is right"
+  },
+  "1159147943": {
+    "name": "Melilla",
+    "w": "ESP",
+    "why": "Spanish city; world.json has no Melilla polygon so the dot falls in MAR. Pinned to Spain"
+  },
+  "1159151203": {
+    "name": "Jerusalem",
+    "w": "ISR",
+    "why": "NE point is West Jerusalem (west of the 1949 line); it touches both ISR and PSX edges (0.0 units) and lands in PSX only through generalisation. Pinned to NE's ISR. Lead to confirm"
+  },
+  "1159146301": {
+    "name": "Gibraltar",
+    "w": "GBR",
+    "why": "British overseas territory with no polygon in world.json; nearest polygon is ESP. Pinned to GBR (sovereign). Lead to confirm"
+  }
+}

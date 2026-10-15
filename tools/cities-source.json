@@ -1,0 +1,14 @@
+{
+  "_comment": "Pinned source for tools/make-cities.py. The script refuses any file whose SHA-256 or size differs. To update: pick a new natural-earth-vector release tag, re-check LICENSE.md, then update every field here and rerun.",
+  "dataset": "Natural Earth 1:10m cultural vectors: populated places",
+  "repo": "https://github.com/nvkelso/natural-earth-vector",
+  "tag": "v5.1.2",
+  "commit": "f1890d9f152c896d250a77557a5751a93d494776",
+  "path": "geojson/ne_10m_populated_places.geojson",
+  "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_populated_places.geojson",
+  "sha256": "9b8e3de09048ef00dfc70357dbb9fa324493f214b5e0ae4daf1aa79a8d10116b",
+  "bytes": 19359003,
+  "license": "Public domain. LICENSE.md at v5.1.2 opens with 'Everything here is public domain.' (verified 2026-10-14)",
+  "fallback": "https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-populated-places/ (zip; .dbf only). Not wired into the script.",
+  "verified": "2026-10-14"
+}
