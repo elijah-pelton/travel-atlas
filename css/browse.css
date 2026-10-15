@@ -1,0 +1,153 @@
+/* Travel Atlas: "Browse as a list" under each map (js/browse.js). Loaded after css/features.css.
+   Uses only tokens from css/app.css and css/features.css, so light/dark and all 7 accents follow
+   automatically. No inline styles anywhere (CSP): JS only sets classes and attributes.
+
+   SELECTOR CONTRACT
+     details.browse[data-map] > summary.browse-sum(> .browse-title + .browse-count) + .browse-inner
+     .browse-inner > .browse-filter > input.browse-q[type=search]
+                   + p.browse-live.brow-vh (polite live region) + p.browse-empty[hidden] + .browse-body
+     .browse-body > details.browse-group[data-group] > summary(> h3.bg-title + .bg-count) + .bg-body
+     .bg-body > (h4.bg-sub)? + ul.brow-list > li.brow(.on|.want)[data-id]
+     li.brow > .brow-line(> button.brow-exp[aria-expanded] | span.brow-label, .brow-marks, .brow-vh, .brow-acts)
+             + ul.brow-cities > li.brow.brow-city | li.brow-note
+     .brow-acts > button.bt.bt-been[aria-pressed] + button.bt.bt-want[aria-pressed] + button.bt-info
+                | span.brow-st (view pages) + button.bt-info (notes view only)
+*/
+
+.browse { margin: 16px 0 0; border: 1px solid var(--rule); border-radius: 12px; background: var(--panel); }
+.browse-sum {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 16px; min-height: 44px; font-weight: 600; font-size: 14px;
+}
+.browse-sum::-webkit-details-marker { display: none; }
+.browse-sum::before {
+  content: ""; width: 0; height: 0; flex: none;
+  border-left: 6px solid currentColor; border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  transition: transform .15s ease;
+}
+.browse[open] > .browse-sum::before { transform: rotate(90deg); }
+.browse-sum:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 12px; }
+.browse-count { margin-left: auto; font-family: var(--font-mono); font-weight: 400; font-size: 12px; color: var(--muted); }
+
+.browse-inner { padding: 0 16px 12px; }
+.browse-filter { margin: 0 0 8px; }
+.browse-q {
+  width: 100%; max-width: 380px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--rule);
+  background: var(--panel-2); color: var(--ink); font-size: 14px;
+}
+.browse-q::placeholder { color: var(--muted); }
+.browse-empty { margin: 6px 0; color: var(--muted); font-size: 13.5px; }
+.browse-empty[hidden] { display: none; }
+
+/* visually hidden, still read (live region, rating/note words) */
+.brow-vh {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---------- groups ---------- */
+.browse-group { border-top: 1px solid var(--rule); }
+.browse-group[hidden] { display: none; }
+.browse-group > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 6px 2px; min-height: 40px;
+}
+.browse-group > summary::-webkit-details-marker { display: none; }
+.browse-group > summary::before {
+  content: ""; width: 0; height: 0; flex: none;
+  border-left: 5px solid var(--muted); border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transition: transform .15s ease;
+}
+.browse-group[open] > summary::before { transform: rotate(90deg); }
+.browse-group > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
+.bg-title { margin: 0; font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+.bg-count { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.bg-body { padding: 0 0 8px 13px; }
+.bg-sub {
+  margin: 10px 0 2px; font-size: 12px; font-weight: 500; color: var(--muted);
+  letter-spacing: .02em; text-transform: uppercase;
+}
+
+/* ---------- rows ---------- */
+.brow-list, .brow-cities { list-style: none; margin: 0; padding: 0; max-width: 620px; }
+.brow-line { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 1px 0; }
+.brow-list > .brow + .brow > .brow-line { border-top: 1px solid color-mix(in oklab, var(--rule) 60%, transparent); }
+.brow-exp, .brow-label {
+  flex: 1 1 auto; min-width: 0; text-align: left; font-size: 14px; line-height: 1.35; padding: 5px 4px 5px 0;
+}
+.brow-exp { border: 0; background: transparent; cursor: pointer; border-radius: 6px; }
+.brow-exp:hover .brow-name { text-decoration: underline; text-underline-offset: 2px; }
+.brow-label { padding-left: 18px; }
+.brow-city .brow-label { padding-left: 0; }
+.brow-exp .bi-chev {
+  width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; color: var(--muted);
+  transition: transform .15s ease;
+}
+.brow-exp[aria-expanded="true"] .bi-chev { transform: rotate(90deg); }
+.brow-sub { color: var(--muted); font-size: 12.5px; }
+
+/* status swatch, same look as the legend */
+.brow-sw {
+  display: inline-block; width: 13px; height: 9px; margin-right: 7px; vertical-align: 0;
+  border: 1px solid var(--line); background: var(--land); border-radius: 2px;
+}
+.brow.on > .brow-line .brow-sw { background: var(--visited); border-color: var(--visited-hover); }
+.brow.want > .brow-line .brow-sw {
+  border-color: var(--want-stripe);
+  background: repeating-linear-gradient(45deg, var(--want-stripe) 0 1.5px, var(--land) 1.5px 4px);
+}
+
+.brow-marks { flex: none; font-family: var(--font-mono); font-size: 11.5px; color: var(--visited-ink); }
+.brow-marks:empty { display: none; }
+.brow-acts { flex: none; display: flex; align-items: center; gap: 6px; }
+
+.bt {
+  min-height: 28px; padding: 2px 11px; border-radius: 999px; border: 1px solid var(--rule);
+  background: transparent; color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.bt:hover { color: var(--ink); border-color: var(--line); }
+.bt-been[aria-pressed="true"] {
+  background: var(--visited-tint); color: var(--visited-ink); border-color: var(--visited); font-weight: 600;
+}
+.bt-want[aria-pressed="true"] {
+  color: var(--want-ink); border: 1.5px dashed var(--want-stripe); padding: 1.5px 10.5px; font-weight: 600;
+}
+.bt-info {
+  width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.bt-info:hover { color: var(--ink); background: var(--panel-2); }
+.bt-info[hidden] { display: none; }
+.bt-info .bi { width: 16px; height: 16px; }
+.brow-st { font-size: 12.5px; color: var(--muted); }
+.brow.on > .brow-line .brow-st { color: var(--visited-ink); }
+.brow.want > .brow-line .brow-st { color: var(--want-ink); }
+
+.brow-cities { margin: 0 0 6px 5px; padding-left: 14px; border-left: 1px solid var(--rule); }
+.brow-city .brow-exp, .brow-city .brow-label { font-size: 13.5px; }
+.brow-note { color: var(--muted); font-size: 13px; padding: 6px 0; margin: 0; }
+.brow-link {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--ink); cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .browse-inner { padding: 0 10px 10px; }
+  .browse-sum { padding: 10px 12px; }
+  .browse-q { font-size: 16px; max-width: none; }
+  .browse-group > summary { min-height: 44px; }
+  .bg-body { padding-left: 4px; }
+  .brow-line { gap: 4px; }
+  .brow-exp, .brow-label { min-height: 40px; }
+  /* the city count drops under the name instead of wrapping mid-phrase */
+  .brow-sub { display: block; padding-left: 38px; font-size: 12px; }
+  .brow-dot { display: none; }
+  .bt { min-height: 40px; padding: 2px 10px; }
+  .bt-want[aria-pressed="true"] { padding: 1.5px 9.5px; }
+  .bt-info { width: 40px; height: 40px; }
+  .brow-link { display: inline-block; min-height: 40px; line-height: 40px; }
+  .brow-cities { margin-left: 2px; padding-left: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .browse-sum::before, .browse-group > summary::before, .brow-exp .bi-chev { transition: none; }
+}

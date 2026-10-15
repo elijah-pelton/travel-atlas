@@ -1,6 +1,6 @@
 # Travel Atlas
 
-Travel Atlas is a pair of maps for keeping track of where you have been and where you want to go. One map covers the United States and Canada. The other covers the world. About 3,300 cities appear as you zoom in; U.S. and Canadian ones show on both maps. Tap a place to mark it; a switch on each map changes taps from "Been there" to "Want to go", and want places show up striped. Tap a name in the lists below a map to give it a rating from 1 to 5, the year you went and a short note. The Ratings map style colors the map by your stars.
+Travel Atlas is a pair of maps for keeping track of where you have been and where you want to go. One map covers the United States and Canada. The other covers the world. About 3,300 cities appear as you zoom in; U.S. and Canadian ones show on both maps. Tap a place to mark it; a switch on each map changes taps from "Been there" to "Want to go", and want places show up striped. Tap a name in the lists below a map to give it a rating from 1 to 5, the year you went and a short note. The Ratings map style colors the map by your stars. Under each map, Browse as a list lets you find and mark places and their cities from a list grouped by state, province or continent instead of tapping the map.
 
 The Color button lets you pick the color for places you've been (amber, coral, rose, violet, blue, teal or green); each device remembers its own choice. It works offline after the first load and can be installed like an app on a phone or computer.
 
@@ -126,10 +126,12 @@ The tests start the local server themselves.
 - `js/places-panel.js` - the notes and ratings panel
 - `js/ratings.js` - the Ratings map style
 - `js/cities.js` - city dots, tapping and search
+- `js/browse.js` - the Browse as a list section under each map (`css/browse.css`)
 - `js/vendor/` - the QR code library
 - `data/` - map geometry (JSON)
 - `data/cities.json` - city names, positions and zoom tiers
 - `data/cities-ids.json` - every city ID ever published, so the server keeps accepting old ones
+- `data/regions.json` - the continent of every place on the world map, for the list
 - `terrain/` - shaded-relief JPEGs used by the Real map view
 - `fonts/` - self-hosted fonts and their licenses
 - `icons/` - app icons
@@ -146,6 +148,7 @@ The tests start the local server themselves.
 - `tools/split-seed.py` - re-extracts the data and terrain files from the original single-file version
 - `tools/make-icons.*` - generates the icon PNGs from the SVG source
 - `tools/make-cities.py` - builds the city data from Natural Earth
+- `tools/make-regions.py` - builds `data/regions.json` from Natural Earth (`--check` verifies it)
 - `tools/make-place-ids.mjs` - regenerates the server's list of allowed place IDs
 - `tests/` - automated checks
 
