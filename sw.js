@@ -1,21 +1,29 @@
 /* Travel Atlas service worker. Plain JS, no imports.
  *
- * Bump VERSION whenever any precached file changes; the new worker installs alongside the
- * old one and waits. The page shows "Update available · Reload", posts {type:'SKIP_WAITING'},
- * and reloads on controllerchange.
+ * VERSION is stamped by tools/stamp-sw.py: a hash of every precached file plus this file's
+ * own code. Run `python3 tools/stamp-sw.py` before each commit; any change to the app then
+ * changes sw.js byte-for-byte, so installed copies always notice the new version.
+ *
+ * Update flow: the new worker installs alongside the old one and waits. The page shows
+ * "Update available · Reload", posts {type:'SKIP_WAITING'}, and reloads on controllerchange.
+ * Nothing refreshes on its own.
  *
  * Strategies (same-origin GET only; everything else goes straight to the network):
- *   navigations          network-first, fall back to cached ./index.html (offline)
- *   ./terrain/*.jpg      cache-first into the terrain cache, stored on first fetch
- *   everything else      cache-first (precached shell: css, js, data, icons, fonts),
- *                        network fallback, successful responses stored
+ *   navigations to the app   cache-first from this version's precached ./index.html, so the
+ *                            page and its CSS/JS always come from the same version; network
+ *                            only if the cache is missing it. Never written from here.
+ *   other navigations        network, falling back to the cached ./index.html when offline
+ *   ./terrain/*.jpg          cache-first into the unversioned terrain cache (kept across
+ *                            versions; terrain files are renamed if their content changes)
+ *   everything else          cache-first from this version's shell cache (css, js, data,
+ *                            icons, fonts), network fallback, successful responses stored
  */
-const VERSION = 'v2';
+const VERSION = '95a30b029e';
 const SHELL_CACHE = 'atlas-shell-' + VERSION;
-const TERRAIN_CACHE = 'atlas-terrain-' + VERSION;
-const CURRENT = [SHELL_CACHE, TERRAIN_CACHE];
+const TERRAIN_CACHE = 'atlas-terrain';
+const LEGACY_TERRAIN_PREFIX = 'atlas-terrain-';   // old per-version terrain caches
 
-// Must match the "precache" list in tools/asset-list.json.
+// Generated from the "precache" list in tools/asset-list.json by tools/stamp-sw.py.
 const PRECACHE = [
   './',
   './index.html',
@@ -39,6 +47,7 @@ const PRECACHE = [
 ];
 
 const abs = (path) => new URL(path, self.location).href;
+const SCOPE_URL = abs('./');
 const INDEX_URL = abs('./index.html');
 const TERRAIN_PREFIX = abs('./terrain/');
 
@@ -47,7 +56,8 @@ const cacheable = (res) => res && res.ok && res.status === 200 && res.type === '
 
 self.addEventListener('install', (event) => {
   // All-or-nothing: if any file fails, the install fails and the old worker stays.
-  // cache: 'reload' bypasses the HTTP cache so a new VERSION gets fresh files.
+  // cache: 'reload' bypasses the HTTP cache (GitHub Pages sends max-age=600), so a new
+  // version never precaches stale copies of the old files.
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) =>
       cache.addAll(PRECACHE.map((p) => new Request(abs(p), { cache: 'reload' })))
@@ -61,15 +71,30 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(
-        keys
-          .filter((k) => k.startsWith('atlas-') && !CURRENT.includes(k))
-          .map((k) => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    // Carry terrain over from older per-version caches before deleting them.
+    const legacy = keys.filter((k) => k.startsWith(LEGACY_TERRAIN_PREFIX));
+    if (legacy.length) {
+      try {
+        const terrain = await caches.open(TERRAIN_CACHE);
+        for (const name of legacy) {
+          const old = await caches.open(name);
+          for (const req of await old.keys()) {
+            if (await terrain.match(req)) continue;
+            const res = await old.match(req);
+            if (res) await terrain.put(req, res);
+          }
+        }
+      } catch (_) { /* best-effort; terrain is re-fetched on demand */ }
+    }
+    await Promise.all(
+      keys
+        .filter((k) => k.startsWith('atlas-') && k !== SHELL_CACHE && k !== TERRAIN_CACHE)
+        .map((k) => caches.delete(k))
+    );
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', (event) => {
@@ -79,7 +104,9 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (req.mode === 'navigate') {
-    event.respondWith(networkFirstPage(req));
+    const page = url.origin + url.pathname;
+    if (page === SCOPE_URL || page === INDEX_URL) event.respondWith(appShell(req));
+    else event.respondWith(otherPage(req));
   } else if (url.href.startsWith(TERRAIN_PREFIX) && url.pathname.endsWith('.jpg')) {
     event.respondWith(cacheFirst(req, TERRAIN_CACHE));
   } else {
@@ -87,18 +114,26 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-async function networkFirstPage(req) {
+// Look only in THIS version's shell cache: a newer worker's cache may already exist while
+// this one is still in control, and its HTML must not be mixed with this version's JS/CSS.
+async function cachedIndex() {
+  const cache = await caches.open(SHELL_CACHE);
+  return (
+    (await cache.match(INDEX_URL, { ignoreSearch: true })) ||
+    (await cache.match(SCOPE_URL, { ignoreSearch: true }))
+  );
+}
+
+async function appShell(req) {
+  const cached = await cachedIndex();
+  return cached || fetch(req);
+}
+
+async function otherPage(req) {
   try {
-    const res = await fetch(req);
-    if (cacheable(res)) {
-      const copy = res.clone();
-      caches.open(SHELL_CACHE).then((c) => c.put(INDEX_URL, copy)).catch(() => {});
-    }
-    return res;
+    return await fetch(req);
   } catch (err) {
-    const cached =
-      (await caches.match(INDEX_URL, { ignoreSearch: true })) ||
-      (await caches.match(abs('./'), { ignoreSearch: true }));
+    const cached = await cachedIndex();
     if (cached) return cached;
     throw err;
   }

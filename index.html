@@ -29,8 +29,8 @@
     <div class="tools">
       <div class="search">
         <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.6"/><path d="M10.5 10.5 14 14"/></svg>
-        <input id="q" type="search" placeholder="Find a place… (e.g. Singapore)" autocomplete="off" aria-label="Find a place">
-        <ul class="results" id="results" hidden></ul>
+        <input id="q" type="search" placeholder="Find a place… (e.g. Singapore)" autocomplete="off" aria-label="Find a place" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="results">
+        <ul class="results" id="results" role="listbox" aria-label="Matching places" hidden></ul>
       </div>
       <div class="seg" role="group" aria-label="Map style" id="style-seg">
         <button type="button" data-style="flat" aria-pressed="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3" width="12" height="10" rx="1.5"/></svg>Flat colors</button>
@@ -53,7 +53,7 @@
       <button type="button" class="btn" id="install-btn" hidden>Install</button>
     </div>
   </header>
-  <div class="ios-hint" id="ios-hint" role="note" hidden><span>To install: Share → Add to Home Screen.</span><button type="button" class="x" id="ios-hint-close" aria-label="Dismiss" title="Dismiss">×</button></div>
+  <div class="ios-hint" id="ios-hint" role="note" hidden><span>To install: Share → Add to Home Screen. Install before marking — marks made in Safari don’t move to the installed app (use Backup to carry them).</span><button type="button" class="x" id="ios-hint-close" aria-label="Dismiss" title="Dismiss">×</button></div>
 
   <dialog id="backup" aria-labelledby="backup-title">
     <form method="dialog" class="dlg">
@@ -85,7 +85,7 @@
     <div class="frame" id="frame-na">
       <div class="frame-loading" role="status">Loading maps…</div>
       <div class="zoom" data-for="na"></div>
-      <div class="toast" id="toast-na"></div>
+      <div class="toast" id="toast-na" role="status" aria-live="polite"></div>
     </div>
     <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
     <div class="visited-list" id="list-na"></div>
@@ -102,7 +102,7 @@
     <div class="frame" id="frame-world">
       <div class="frame-loading" role="status">Loading maps…</div>
       <div class="zoom" data-for="world"></div>
-      <div class="toast" id="toast-world"></div>
+      <div class="toast" id="toast-world" role="status" aria-live="polite"></div>
     </div>
     <div class="legend"><span><i class="on"></i>Been there</span><span><i></i>Not yet</span><span><i class="dot"></i>Small place — click the dot</span><span>Scroll or pinch to zoom · drag to pan</span></div>
     <div class="visited-list" id="list-world"></div>

@@ -21,6 +21,8 @@
     --line-real: rgba(38, 48, 58, .6);
     --label-ink: #262c31;
     --label-halo: rgba(255, 255, 255, .88);
+    --ok-ink: #237a4b;
+    --err-ink: #b5341f;
     --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
     --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -47,6 +49,8 @@
       --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px -14px rgba(0, 0, 0, .6);
       --terrain-filter: brightness(.82) saturate(.9);
       --line-real: rgba(20, 28, 36, .7);
+      --ok-ink: #5cc98a;
+      --err-ink: #ff8a7a;
     }
   }
   :root[data-theme="dark"] {
@@ -70,6 +74,8 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px -14px rgba(0, 0, 0, .6);
     --terrain-filter: brightness(.82) saturate(.9);
     --line-real: rgba(20, 28, 36, .7);
+    --ok-ink: #5cc98a;
+    --err-ink: #ff8a7a;
   }
 
   * { box-sizing: border-box; }
@@ -110,6 +116,8 @@
   .status[data-state="saved"]::before { background: #3aa66a; opacity: 1; }
   .status[data-state="unsaved"]::before { background: var(--visited); opacity: 1; }
   .status[data-state="error"]::before { background: #c0392b; opacity: 1; }
+  .status[role="button"] { cursor: pointer; color: var(--ink); }
+  .status[role="button"]:hover { background: var(--panel-2); }
   .status[data-state="connecting"]::before { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 
@@ -200,6 +208,8 @@
   svg.map .dot { fill: var(--land); stroke: var(--line); stroke-width: 1.2; vector-effect: non-scaling-stroke; cursor: pointer; }
   svg.map .dot:hover { fill: var(--land-hover); stroke: var(--ink); }
   svg.map .dot.on { fill: var(--visited); stroke: var(--visited-hover); }
+  /* invisible, larger tap target behind each small-place dot (never painted, even when marked) */
+  svg.map .dot-hit { fill: transparent; stroke: none; pointer-events: all; cursor: pointer; }
   svg.map .inset-bg { fill: var(--water); stroke: var(--rule); stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
   svg.map .inset-bg.on { fill: var(--visited-tint); stroke: var(--visited); }
   svg.map .inset-bg:hover { stroke: var(--line); }
@@ -282,8 +292,9 @@
   .dlg-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .dlg-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
   .dlg-note { margin: 0; font-size: 13px; color: var(--muted); min-height: 1em; }
-  .dlg-note.ok { color: #2f8f5b; }
-  .dlg-note.err { color: #c0392b; }
+  .dlg-note.ok { color: var(--ok-ink); }
+  .dlg-note.err { color: var(--err-ink); }
+  .dlg-note .undo { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
   footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12.5px; }
   footer p { margin: 4px 0; max-width: 70ch; }
@@ -297,6 +308,13 @@
     .masthead .tools { width: 100%; }
     .search { flex: 1; }
     .search .results { left: 0; right: auto; min-width: 0; width: 100%; }
+    /* 16px stops iOS Safari from zooming the page when these get focus */
+    .search input, .dlg textarea { font-size: 16px; }
+    /* finger-sized targets */
+    .zoom button { width: 40px; height: 40px; }
+    .dlg-head .x, .ios-hint .x { min-width: 40px; min-height: 40px; }
+    .chip { position: relative; margin: 7px 6px 7px 0; }
+    .chip::after { content: ""; position: absolute; inset: -7px -3px; }
   }
 
   /* PWA additions */
@@ -329,6 +347,20 @@
   }
   .update-toast .btn { padding: 4px 12px; border-radius: 999px; background: var(--bg); color: var(--ink); border-color: var(--bg); }
   .update-toast .btn:hover { opacity: .9; background: var(--bg); }
+  /* Installed on iOS the status bar is black-translucent (white icons over the page): give those
+     icons a dark strip to sit on. env(safe-area-inset-top) is 0 everywhere else, so it's invisible there. */
+  @media (display-mode: standalone) {
+    body::before {
+      content: ""; position: fixed; inset: 0 0 auto 0; height: env(safe-area-inset-top, 0px);
+      background: #1b2229; z-index: 1000; pointer-events: none;
+    }
+  }
+  @media (display-mode: standalone) and (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) body::before { background: var(--bg); }
+  }
+  @media (display-mode: standalone) {
+    :root[data-theme="dark"] body::before { background: var(--bg); }
+  }
   .ios-hint[hidden], .update-toast[hidden], .frame-loading[hidden] { display: none; }
 
   footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }

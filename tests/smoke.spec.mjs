@@ -366,7 +366,7 @@ test('10 offline reload shows both maps and previously viewed terrain', async ({
   // wait for the SW to have stored the terrain
   await expect.poll(() => page.evaluate(async () => {
     const keys = await caches.keys();
-    const t = keys.find(k => k.startsWith('atlas-terrain-'));
+    const t = keys.find(k => k === 'atlas-terrain' || k.startsWith('atlas-terrain'));
     if (!t) return 0;
     return (await (await caches.open(t)).keys()).length;
   }), { timeout: 15000 }).toBeGreaterThanOrEqual(9);

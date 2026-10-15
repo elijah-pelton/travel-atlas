@@ -41,6 +41,13 @@
     t.style.display = 'none';
   }
 
+  // Small places get a visible dot plus an invisible, larger hit circle (same place id) so they
+  // stay easy to tap on a phone. The hit circle's radius is kept ~22 CSS px across at every zoom.
+  function addDot(r, map, hitParent, dotParent) {
+    const h = el('circle', { class: 'dot-hit', cx: r.dot[0], cy: r.dot[1], r: 10 }, hitParent); register(r, map, h);
+    const c = el('circle', { class: 'dot', cx: r.dot[0], cy: r.dot[1], r: 3.2 }, dotParent); register(r, map, c);
+  }
+
   function buildNA() {
     const svg = el('svg', { viewBox: `0 0 ${NA.w} ${NA.h}`, class: 'map', 'data-map': 'na', role: 'group', 'aria-label': 'Map of the United States and Canada' });
     const defs = el('defs', {}, svg);
@@ -49,11 +56,12 @@
     el('path', { class: 'ctx', d: NA.context }, svg);
     const g = el('g', { class: 'places' }, svg);
     const labels = el('g', { class: 'labels', 'data-size': 11 }, svg);
+    const hits = el('g', { class: 'hits' }, svg);
     const dots = el('g', { class: 'dots' }, svg);
     for (const r of NA.places) {
       const p = el('path', { class: 'place', d: r.d, 'data-kind': r.kind }, g);
       register(r, 'na', p);
-      if (r.dot) { const c = el('circle', { class: 'dot', cx: r.dot[0], cy: r.dot[1], r: 3.2 }, dots); register(r, 'na', c); }
+      if (r.dot) addDot(r, 'na', hits, dots);
       if (r.kind !== 'dc') label(labels, r);
     }
     el('line', { class: 'tray-line', x1: 0, y1: NA.mainH, x2: NA.w, y2: NA.mainH }, svg);
@@ -70,7 +78,7 @@
       for (const r of ins.places) {
         const p = el('path', { class: 'place', d: r.d, 'data-kind': r.kind }, ig);
         register(r, 'na', p);
-        if (r.dot) { const c = el('circle', { class: 'dot', cx: r.dot[0], cy: r.dot[1], r: 3.2 }, ig); register(r, 'na', c); }
+        if (r.dot) addDot(r, 'na', ig, ig);
       }
     });
     return svg;
@@ -85,11 +93,12 @@
     terrain(svg, TERRAIN.world, { x: 0, y: 0, width: WORLD.w, height: WORLD.h, 'clip-path': 'url(#clip-sphere)' });
     const g = el('g', { class: 'places' }, svg);
     const labels = el('g', { class: 'labels', 'data-size': 10 }, svg);
+    const hits = el('g', { class: 'hits' }, svg);
     const dots = el('g', { class: 'dots' }, svg);
     for (const r of WORLD.places) {
       const p = el('path', { class: 'place', d: r.d, 'data-kind': r.kind }, g);
       register(r, 'world', p);
-      if (r.dot) { const c = el('circle', { class: 'dot', cx: r.dot[0], cy: r.dot[1], r: 3.2 }, dots); register(r, 'world', c); }
+      if (r.dot) addDot(r, 'world', hits, dots);
       if (r.id !== 'ATA') label(labels, r);
     }
     // the sphere outline sits on top so the terrain has a crisp edge
@@ -195,13 +204,15 @@
     });
     const registerSW = () => {
       navigator.serviceWorker.register('./sw.js').then(reg => {
-        if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
-        reg.addEventListener('updatefound', () => {
-          const w = reg.installing; if (!w) return;
+        const watch = w => {
+          if (!w) return;
           w.addEventListener('statechange', () => {
             if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(w);
           });
-        });
+        };
+        if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
+        watch(reg.installing);                     // an update may already be mid-install
+        reg.addEventListener('updatefound', () => watch(reg.installing));
       }).catch(() => {});
     };
     if (document.readyState === 'complete') registerSW(); else window.addEventListener('load', registerSW);
@@ -256,8 +267,8 @@
     const chips = $('.chips', host);
     for (const p of names) {
       const b = document.createElement('button');
-      b.className = 'chip'; b.type = 'button'; b.title = 'Clear ' + p.name;
-      b.innerHTML = `<span></span><span class="x">×</span>`;
+      b.className = 'chip'; b.type = 'button'; b.title = 'Clear ' + p.name; b.setAttribute('aria-label', 'Remove ' + p.name);
+      b.innerHTML = `<span></span><span class="x" aria-hidden="true">×</span>`;
       b.firstChild.textContent = p.name;
       b.addEventListener('click', () => toggle(p.id));
       chips.appendChild(b);
@@ -333,19 +344,45 @@
         L.t.style.display = room >= need ? '' : 'none';
       }
     }
-    function set(nx, ny, nw) {
+    // dot / hit-circle sizes depend only on the zoom factor and the map's on-screen width,
+    // so they (and the labels) are recomputed only when one of those changes — never on a pure pan
+    const dotEls = [...svg.querySelectorAll('circle.dot')];
+    // each hit circle stops at half the distance to its nearest neighbouring dot, so neighbours
+    // never overlap and a tap always goes to the closest small place
+    const hitEls = [...svg.querySelectorAll('circle.dot-hit')].map(c => ({ c, x: +c.getAttribute('cx'), y: +c.getAttribute('cy'), max: Infinity }));
+    for (const a of hitEls) for (const b of hitEls) if (a !== b) a.max = Math.min(a.max, Math.hypot(a.x - b.x, a.y - b.y) / 2);
+    const HIT_PX = 11;                                       // hit-circle radius in CSS px (~22 px across)
+    function sizeMarks() {
+      const r = 3.2 / Math.sqrt(k);
+      const rs = r.toFixed(2);
+      for (const c of dotEls) c.setAttribute('r', rs);
+      const s = scale();
+      if (s > 0) for (const h of hitEls) h.c.setAttribute('r', Math.max(r, Math.min(HIT_PX / s, h.max)).toFixed(2));
+    }
+    function apply(nx, ny, nw) {
       nw = clamp(nw, W / MAXK, W); const nh = nw * H / W;
       nx = clamp(nx, 0, W - nw); ny = clamp(ny, 0, H - nh);
+      const prevK = k;
       vb = { x: nx, y: ny, w: nw, h: nh }; k = W / nw;
       svg.setAttribute('viewBox', `${nx} ${ny} ${nw} ${nh}`);
-      svg.classList.toggle('zoomed', k > 1.001);
-      btnReset.disabled = k <= 1.001; btnIn.disabled = k >= MAXK - 0.001; btnOut.disabled = k <= 1.001;
-      const r = 3.2 / Math.sqrt(k);
-      svg.querySelectorAll('circle.dot').forEach(c => c.setAttribute('r', r.toFixed(2)));
-      layoutLabels();
+      if (k !== prevK) {
+        svg.classList.toggle('zoomed', k > 1.001);
+        btnReset.disabled = k <= 1.001; btnIn.disabled = k >= MAXK - 0.001; btnOut.disabled = k <= 1.001;
+        sizeMarks();
+        layoutLabels();
+      }
     }
+    // pointer moves are coalesced to one view update per animation frame
+    let rafId = 0, pending = null;
+    function flush() { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } if (pending) { const p = pending; pending = null; apply(p[0], p[1], p[2]); } }
+    function schedule(nx, ny, nw) {
+      pending = [nx, ny, nw];
+      if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; flush(); });
+    }
+    function set(nx, ny, nw) { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } pending = null; apply(nx, ny, nw); }
     function scale() { return svg.getBoundingClientRect().width / vb.w; }
-    window.addEventListener('resize', layoutLabels);
+    window.addEventListener('resize', () => { sizeMarks(); layoutLabels(); });
+    sizeMarks();
     function toSvg(cx, cy) { const rct = svg.getBoundingClientRect(); const s = rct.width / vb.w; return [vb.x + (cx - rct.left) / s, vb.y + (cy - rct.top) / s]; }
     function zoomAt(f, px, py) {
       const nw = clamp(vb.w / f, W / MAXK, W); const real = vb.w / nw;
@@ -374,7 +411,8 @@
       if (e.button !== 0 && e.pointerType === 'mouse') return;
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pts.size === 1) {
-        drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, vx: vb.x, vy: vb.y, moved: false, target: e.target };
+        // a touch/pen pointer jitters more than a mouse, so it needs a bigger move before it counts as a drag
+        drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, vx: vb.x, vy: vb.y, moved: false, target: e.target, slop: e.pointerType === 'mouse' ? 4 : 10, s: 0 };
         try { svg.setPointerCapture(e.pointerId); } catch (_) {}
       } else if (pts.size === 2) {
         drag = null;
@@ -389,19 +427,20 @@
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         const nw = clamp(pinch.w0 * (pinch.d0 / Math.max(d, 1)), W / MAXK, W);
         const real = vb.w / nw;
-        set(pinch.mid[0] - (pinch.mid[0] - vb.x) / real, pinch.mid[1] - (pinch.mid[1] - vb.y) / real, nw);
+        schedule(pinch.mid[0] - (pinch.mid[0] - vb.x) / real, pinch.mid[1] - (pinch.mid[1] - vb.y) / real, nw);
         return;
       }
       if (drag && e.pointerId === drag.id) {
         const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
-        if (!drag.moved && Math.hypot(dx, dy) > 4) { drag.moved = true; svg.classList.add('dragging'); hideTip(); }
-        if (drag.moved) { const s = scale(); set(drag.vx - dx / s, drag.vy - dy / s, vb.w); }
+        if (!drag.moved && Math.hypot(dx, dy) > drag.slop) { drag.moved = true; drag.s = scale(); svg.classList.add('dragging'); hideTip(); }
+        if (drag.moved) schedule(drag.vx - dx / drag.s, drag.vy - dy / drag.s, vb.w);
       } else if (e.pointerType === 'mouse') {
         const id = e.target && e.target.dataset ? e.target.dataset.id : null;
         if (id) showTip(id, e.clientX, e.clientY); else hideTip();
       }
     });
     function endPointer(e) {
+      flush();                                   // apply the last move before the gesture ends
       pts.delete(e.pointerId);
       if (pts.size < 2) pinch = null;
       if (drag && e.pointerId === drag.id) {
@@ -459,22 +498,44 @@
   const ALIASES = { 'US-DC': 'washington dc district of columbia', USA: 'usa america', GBR: 'uk britain england scotland wales', ARE: 'uae dubai', CZE: 'czech republic', KOR: 'korea', PRK: 'korea', COD: 'congo kinshasa', COG: 'congo brazzaville', MMR: 'burma', SWZ: 'swaziland', TLS: 'east timor', CIV: 'ivory coast', 'CA-QC': 'quebec', 'CA-NL': 'newfoundland labrador', 'US-VIR': 'usvi', NLD: 'holland', VAT: 'vatican holy see', MKD: 'macedonia', TUR: 'turkiye' };
   const index = [...places.values()].map(p => ({ p, key: norm(p.name + ' ' + (ALIASES[p.id] || '')) }));
   let active = -1, shown = [];
+  // combobox semantics: #q owns the #results listbox; the highlighted option is aria-activedescendant
+  function showResults(open) {
+    results.hidden = !open;
+    q.setAttribute('aria-expanded', String(open));
+    if (!open) q.removeAttribute('aria-activedescendant');
+  }
+  function optionLabel(li) {
+    const p = places.get(li.dataset.id); if (!p) return;
+    const on = state.has(p.id);
+    li.classList.toggle('on', on);
+    li.setAttribute('aria-checked', String(on));
+    li.setAttribute('aria-label', `${p.name}, ${(KIND_LABEL[p.kind] || '')} · ${MAP_LABEL[p.map]}${on ? ', been there' : ', not yet'}`);
+  }
+  function refreshResults() { for (const li of results.querySelectorAll('li[data-id]')) optionLabel(li); }
+  function setActive(i, items) {
+    active = i;
+    items.forEach((li, j) => { const on = j === active; li.classList.toggle('active', on); li.setAttribute('aria-selected', String(on)); });
+    if (items[active]) { q.setAttribute('aria-activedescendant', items[active].id); items[active].scrollIntoView({ block: 'nearest' }); }
+    else q.removeAttribute('aria-activedescendant');
+  }
   function renderResults() {
     const v = norm(q.value.trim());
-    results.innerHTML = ''; active = -1;
-    if (!v) { results.hidden = true; return; }
+    results.innerHTML = ''; active = -1; q.removeAttribute('aria-activedescendant');
+    if (!v) { showResults(false); return; }
     shown = index.filter(e => e.key.includes(v)).sort((a, b) => (a.key.startsWith(v) ? 0 : 1) - (b.key.startsWith(v) ? 0 : 1) || a.p.name.localeCompare(b.p.name)).slice(0, 10).map(e => e.p);
-    if (!shown.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'No place matches that.'; results.appendChild(li); results.hidden = false; return; }
-    for (const p of shown) {
+    if (!shown.length) { const li = document.createElement('li'); li.className = 'empty'; li.setAttribute('role', 'option'); li.setAttribute('aria-disabled', 'true'); li.textContent = 'No place matches that.'; results.appendChild(li); showResults(true); return; }
+    shown.forEach((p, i) => {
       const li = document.createElement('li');
-      li.className = state.has(p.id) ? 'on' : '';
-      li.innerHTML = `<span class="check"></span><span class="name"></span><span class="where"></span>`;
+      li.id = 'result-' + i; li.dataset.id = p.id;
+      li.setAttribute('role', 'option'); li.setAttribute('aria-selected', 'false');
+      li.innerHTML = `<span class="check" aria-hidden="true"></span><span class="name"></span><span class="where"></span>`;
       $('.name', li).textContent = p.name;
       $('.where', li).textContent = (KIND_LABEL[p.kind] || '') + ' · ' + MAP_LABEL[p.map];
-      li.addEventListener('click', () => { toggle(p.id); li.classList.toggle('on', state.has(p.id)); flashPlace(p.id); });
+      optionLabel(li);
+      li.addEventListener('click', () => { toggle(p.id); optionLabel(li); flashPlace(p.id); });
       results.appendChild(li);
-    }
-    results.hidden = false;
+    });
+    showResults(true);
   }
   q.addEventListener('input', renderResults);
   q.addEventListener('focus', renderResults);
@@ -482,39 +543,70 @@
     const items = [...results.querySelectorAll('li:not(.empty)')];
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault(); if (!items.length) return;
-      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-      items.forEach((li, i) => li.classList.toggle('active', i === active));
+      setActive((active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length, items);
     } else if (e.key === 'Enter') {
       e.preventDefault(); const li = items[active >= 0 ? active : 0]; if (li) li.click();
-    } else if (e.key === 'Escape') { results.hidden = true; q.blur(); }
+    } else if (e.key === 'Escape') { showResults(false); q.blur(); }
   });
-  document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) results.hidden = true; });
+  document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) showResults(false); });
 
   // ---------- persistence ----------
   // Marks live in this browser's storage on this device. Backup (code or file) carries them elsewhere.
   const LS_KEY = 'travel-atlas:v1', LS_T = 'travel-atlas:t', OWNER_KEY = 'travel-atlas:owner';
+  const BACKUP_KEY = 'travel-atlas:lastBackup';            // ms timestamp of the last code copy / file download
+  const BACKUP_MIN = 5, BACKUP_MAX_AGE = 30 * 24 * 3600 * 1000;
   const statusEl = $('#status'), owner = $('#owner');
   const STATUS = {
-    saved: ['Saved on this device', 'Your marks are kept in this browser on this device. Use Backup to move them to another phone or computer.'],
-    error: ['Can’t save here — use Backup', 'This browser isn’t letting the page store anything (private browsing or blocked site data), so marks will be lost when it closes. Copy a backup code or download a backup file.'],
+    saved: ['saved', 'Saved on this device', 'Your marks are kept in this browser on this device. Use Backup to move them to another phone or computer.'],
+    remind: ['unsaved', 'Back up your marks', 'Your marks are kept only in this browser on this device. Copy a backup code or download a backup file so you don’t lose them.'],
+    error: ['error', 'Can’t save here — use Backup', 'This browser isn’t letting the page store anything (private browsing or blocked site data), so marks will be lost when it closes. Copy a backup code or download a backup file.'],
   };
-  function setStatus(s) { statusEl.dataset.state = s; statusEl.textContent = STATUS[s][0]; statusEl.title = STATUS[s][1]; }
+  let canSave = true;
+  function setStatus(s) {
+    const [ds, text, title] = STATUS[s];
+    statusEl.dataset.state = ds; statusEl.textContent = text; statusEl.title = title;
+    if (s === 'remind') { statusEl.setAttribute('role', 'button'); statusEl.tabIndex = 0; }
+    else { statusEl.removeAttribute('role'); statusEl.removeAttribute('tabindex'); }
+  }
+  function backupDue() {
+    if (state.size < BACKUP_MIN) return false;
+    const t = +(LS_SAFE.get(BACKUP_KEY) || 0);
+    return !t || Date.now() - t > BACKUP_MAX_AGE;
+  }
+  // the error state wins; otherwise nudge for a backup once there's something worth keeping
+  function refreshStatus() { setStatus(!canSave ? 'error' : backupDue() ? 'remind' : 'saved'); }
+  function markBackedUp() { LS_SAFE.set(BACKUP_KEY, String(Date.now())); refreshStatus(); }
 
   let lastChange = 0;                       // ms timestamp of the newest change
   function readLocal() {
-    try {
-      const o = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
-      return { v: Object.keys(o).filter(id => o[id] && places.has(id)), owner: localStorage.getItem(OWNER_KEY) || '', t: +(localStorage.getItem(LS_T) || 0) };
-    } catch (_) { return { v: [], owner: '', t: 0 }; }
+    let raw = null;
+    try { raw = localStorage.getItem(LS_KEY); } catch (_) { return { v: [], owner: '', t: 0 }; }
+    let o = {};
+    if (raw) {
+      try {
+        o = JSON.parse(raw);
+        if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('bad marks');
+      } catch (_) {
+        // keep the unreadable value aside instead of letting the next save destroy it
+        o = {};
+        try { if (localStorage.getItem(LS_KEY + '.bad') !== raw) localStorage.setItem(LS_KEY + '.bad', raw); } catch (_) {}
+      }
+    }
+    return { v: Object.keys(o).filter(id => o[id] && places.has(id)), owner: LS_SAFE.get(OWNER_KEY) || '', t: +(LS_SAFE.get(LS_T) || 0) };
   }
   function saveLocal() {
     try {
       const o = {}; for (const id of state) o[id] = true;
       localStorage.setItem(LS_KEY, JSON.stringify(o)); localStorage.setItem(LS_T, String(lastChange));
       const n = ownerName(); if (n) localStorage.setItem(OWNER_KEY, n); else localStorage.removeItem(OWNER_KEY);
-      setStatus('saved');
-      return true;
-    } catch (_) { setStatus('error'); return false; }
+      canSave = true;
+    } catch (_) { canSave = false; }
+    refreshStatus();
+    return canSave;
+  }
+  // can this browser store anything? Probed on a scratch key so stored marks are never touched.
+  function probeStorage() {
+    try { const k = 'travel-atlas:probe'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (_) { return false; }
   }
   // ask the browser not to evict our storage — once, after the first mark, best-effort
   let persistAsked = false;
@@ -542,7 +634,8 @@
   applySnapshot(readLocal());
   paintAll();
   syncTitle();
-  saveLocal();                              // also tells us whether this browser lets us save at all
+  canSave = probeStorage();
+  refreshStatus();
 
   function markDirty() {
     lastChange = Date.now();
@@ -550,19 +643,26 @@
     syncTitle();
   }
   function persist() { markDirty(); }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveLocal(); });
-  window.addEventListener('pagehide', () => { saveLocal(); });
 
   // ---------- whose atlas ----------
   owner.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); owner.blur(); } });
-  let ownerWas = ownerName();
+  let ownerWas = ownerName();               // the committed (saved) name
+  const editingOwner = () => document.activeElement === owner;
+  function commitOwner() { const n = ownerName(); if (n !== ownerWas) { ownerWas = n; markDirty(); } }
   owner.addEventListener('focus', () => { ownerWas = ownerName(); });
-  owner.addEventListener('blur', () => { const n = ownerName(); if (owner.textContent !== n) owner.textContent = n; if (n !== ownerWas) { ownerWas = n; markDirty(); } });
+  owner.addEventListener('blur', () => { const n = ownerName(); if (owner.textContent !== n) owner.textContent = n; commitOwner(); });
   owner.addEventListener('paste', e => { e.preventDefault(); document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text').replace(/\n/g, ' ')); });
+
+  // Every toggle, restore and committed name is saved the moment it happens, so leaving the page only
+  // saves a name that is still being typed. Re-saving the whole in-memory set here would let a stale
+  // tab or window overwrite newer marks made elsewhere (another tab, or the installed app).
+  function saveIfUnsaved() { if (editingOwner()) commitOwner(); }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveIfUnsaved(); });
+  window.addEventListener('pagehide', saveIfUnsaved);
 
   // ---------- backup & restore ----------
   const dlg = $('#backup'), codeOut = $('#code-out'), codeIn = $('#code-in'), copyNote = $('#copy-note'), restoreNote = $('#restore-note');
-  const fileIn = $('#restore-file-input');
+  const fileIn = $('#restore-file-input'), replaceBox = $('#restore-replace');
   const CODE_PREFIX = 'atlas1:';
   function makeCode() { return CODE_PREFIX + [...state].sort().join(','); }
   function parseCode(s) {
@@ -574,29 +674,58 @@
     return { ids: known, unknown: ids.length - known.length };
   }
   function note(elm, text, cls) { elm.textContent = text; elm.className = elm.className.replace(/\b(ok|err)\b/g, '').trim() + (cls ? ' ' + cls : ''); }
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  let undoRestore = null;                   // {code, owner} from just before the last replace
   // one restore path for both the pasted code and a backup file
   function applyRestore(parsed, emptyMsg) {
     if (!parsed) { note(restoreNote, emptyMsg, 'err'); return false; }
     if (!parsed.ids.length) { note(restoreNote, 'That doesn’t look like a backup code from this page.', 'err'); return false; }
-    const replace = $('#restore-replace').checked;
+    const replace = replaceBox.checked;
+    undoRestore = replace ? { code: makeCode(), owner: ownerName() } : null;
     if (replace) state.clear();
     let added = 0;
     for (const id of parsed.ids) { if (!state.has(id)) { state.add(id); added++; } }
-    paintAll(); markDirty();
+    paintAll(); markDirty(); refreshResults();
     codeOut.value = makeCode();
-    const extra = parsed.unknown ? ` (${parsed.unknown} unrecognized ${parsed.unknown === 1 ? 'entry' : 'entries'} skipped)` : '';
-    note(restoreNote, replace ? `Restored ${parsed.ids.length} ${parsed.ids.length === 1 ? 'place' : 'places'}${extra}.` : `Added ${added} new ${added === 1 ? 'place' : 'places'}${extra}.`, 'ok');
+    const extra = parsed.unknown ? ` (${plural(parsed.unknown, 'unrecognized entry', 'unrecognized entries')} skipped)` : '';
+    if (replace) {
+      note(restoreNote, `Replaced with ${plural(state.size, 'place', 'places')}${extra} · `, 'ok');
+      const u = document.createElement('button');
+      u.type = 'button'; u.className = 'undo'; u.textContent = 'Undo';
+      u.addEventListener('click', undoReplace);
+      restoreNote.appendChild(u);
+    } else {
+      note(restoreNote, `Added ${plural(added, 'new place', 'new places')}${extra}.`, 'ok');
+    }
     return true;
   }
-  $('#backup-btn').addEventListener('click', () => {
+  function undoReplace() {
+    const u = undoRestore; if (!u) return;
+    undoRestore = null;
+    const prev = parseCode(u.code);
+    state.clear(); for (const id of prev ? prev.ids : []) state.add(id);
+    if (ownerName() !== u.owner) { owner.textContent = u.owner; ownerWas = ownerName(); }
+    paintAll(); markDirty(); refreshResults();
+    codeOut.value = makeCode();
+    note(restoreNote, `Undone — your previous ${plural(state.size, 'place is', 'places are')} back.`, 'ok');
+  }
+  function openBackup() {
     codeOut.value = makeCode(); codeIn.value = ''; note(copyNote, ''); note(restoreNote, '');
-    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    replaceBox.checked = false; undoRestore = null;          // "Replace" never carries over from last time
+    if (typeof dlg.showModal === 'function') { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute('open', '');
     codeOut.focus(); codeOut.select();
+  }
+  $('#backup-btn').addEventListener('click', openBackup);
+  // the "Back up your marks" pill opens the Backup dialog
+  statusEl.addEventListener('click', () => { if (statusEl.getAttribute('role') === 'button') openBackup(); });
+  statusEl.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && statusEl.getAttribute('role') === 'button') { e.preventDefault(); openBackup(); }
   });
   $('#copy-code').addEventListener('click', async () => {
     codeOut.focus(); codeOut.select();
     let ok = false;
     try { await navigator.clipboard.writeText(codeOut.value); ok = true; } catch (_) { try { ok = document.execCommand('copy'); } catch (_) {} }
+    if (ok) markBackedUp();
     note(copyNote, ok ? 'Copied. Keep it somewhere safe.' : 'Couldn’t copy automatically — select the code and copy it yourself.', ok ? 'ok' : 'err');
   });
   $('#restore-code').addEventListener('click', () => { applyRestore(parseCode(codeIn.value), 'Paste a backup code first.'); });
@@ -612,6 +741,7 @@
       a.href = url; a.download = name; a.hidden = true;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
+      markBackedUp();
       note(copyNote, `Downloaded ${name}. Keep it somewhere safe.`, 'ok');
     } catch (_) {
       note(copyNote, 'Couldn’t download here — copy the code instead.', 'err');
@@ -653,4 +783,24 @@
     reader.readAsText(f);
   });
   dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+
+  // ---------- other tabs / windows ----------
+  // Another tab, window or the installed app changed the stored marks: adopt them instead of
+  // keeping (and later re-saving) a stale copy.
+  window.addEventListener('storage', e => {
+    if (e.storageArea && e.storageArea !== localStorage) return;
+    if (e.key !== null && e.key !== LS_KEY && e.key !== LS_T && e.key !== OWNER_KEY && e.key !== BACKUP_KEY) return;
+    if (e.key === BACKUP_KEY) { refreshStatus(); return; }
+    const snap = readLocal();
+    state.clear(); for (const id of snap.v) state.add(id);
+    lastChange = snap.t || 0;
+    if (editingOwner()) ownerWas = snap.owner || '';     // don't yank text out from under the cursor
+    else { owner.textContent = snap.owner || ''; ownerWas = ownerName(); }
+    syncTitle();
+    paintAll(); refreshResults();
+    undoRestore = null;                                    // an undo would now overwrite the other tab's work
+    if (dlg.open) codeOut.value = makeCode();
+    canSave = probeStorage();
+    refreshStatus();
+  });
 })();

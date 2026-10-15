@@ -32,6 +32,16 @@ Open Backup in the page header.
 
 When a new version is published, the app shows "Update available · Reload". Tap Reload to switch to it.
 
+## Publishing an update
+
+1. Make your changes.
+2. From the repo root, run `python3 tools/stamp-sw.py`. It updates the version line in `sw.js` so installed copies can tell something changed. (`python3 tools/stamp-sw.py --check` tells you if you forgot.)
+3. Commit and push to `main`. GitHub Pages publishes it within a few minutes.
+
+Installed copies show "Update available · Reload" the next time they are opened.
+
+Terrain images are kept across updates to save downloads. If you ever replace a terrain JPEG, give it a new file name so devices fetch the new one.
+
 ## Run locally
 
 From the repo root:
