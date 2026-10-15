@@ -452,10 +452,11 @@ test('11 manifest valid, icons load, SW controls, Install button', async ({ page
   testInfo.annotations.push({ type: 'note', description: `real beforeinstallprompt observed: ${realBIP}` });
 });
 
-// ---------- 12: relative URLs / subpath / no off-site requests ----------
+// ---------- 12: relative URLs / same-origin only / no API calls when not linked ----------
 
-test('12 every request stays under the app path (no off-site requests)', async ({ page, context }, testInfo) => {
+test('12 every request is same-origin; an unlinked device makes no /api calls', async ({ page, context }, testInfo) => {
   const root = appRoot(testInfo);
+  const origin = new URL(root).origin;
   const all = [];
   context.on('request', r => all.push(r.url()));
   await openApp(page);
@@ -464,6 +465,7 @@ test('12 every request stays under the app path (no off-site requests)', async (
   await page.click('#style-seg button[data-style="real"]');
   await page.waitForTimeout(1500);
   await clickPlace(page, 'svg.map[data-map="world"] path.place[data-id="FRA"]');
+  await page.waitForTimeout(1500); // a linked device would sync ~1 s after a change
   await openBackup(page);
   await Promise.all([page.waitForEvent('download'), page.click('#download-backup')]);
   await page.keyboard.press('Escape');
@@ -471,13 +473,23 @@ test('12 every request stays under the app path (no off-site requests)', async (
   await openApp(page);
   await page.waitForTimeout(1000);
   const net = [...new Set(all)].filter(u => !/^(blob|data|about|chrome-extension):/.test(u));
-  const bad = net.filter(u => !u.startsWith(root));
-  testInfo.annotations.push({ type: 'note', description: `${net.length} distinct URLs, all under ${root}` });
-  expect(bad, 'requests outside ' + root).toEqual([]);
-  // static check of the HTML too: no absolute or root-relative src/href (except the GitHub link)
-  const refs = await page.$$eval('[src],[href]', els => els.map(e => e.getAttribute('src') || e.getAttribute('href')));
+  const offsite = net.filter(u => new URL(u).origin !== origin);
+  testInfo.annotations.push({ type: 'note', description: `${net.length} distinct URLs, all on ${origin}` });
+  expect(offsite, 'requests to another origin (third party)').toEqual([]);
+  // Sync is opt-in: this device never created or joined a shared map, so it never calls the API.
+  const api = net.filter(u => new URL(u).pathname.startsWith('/api/'));
+  expect(api, 'API calls from an unlinked device').toEqual([]);
+  // ...and nothing else that looks like an API call goes anywhere but /api/.
+  const apiLike = net.filter(u => /\/api\b/.test(new URL(u).pathname) && !new URL(u).pathname.startsWith('/api/'));
+  expect(apiLike).toEqual([]);
+  // static check of the HTML too: no absolute or root-relative src/href (except the GitHub
+  // link and the document's own <base href="/">, which is what lets /map/<id> resolve them)
+  const refs = await page.$$eval('[src],[href]', els => els.filter(e => e.tagName !== 'BASE')
+    .map(e => e.getAttribute('src') || e.getAttribute('href')));
   const abs = refs.filter(u => /^(\/|https?:)/.test(u) && !u.startsWith('https://github.com/'));
   expect(abs).toEqual([]);
+  const base = await page.$$eval('base[href]', els => els.map(e => e.getAttribute('href')));
+  expect(base.every(h => h === '/'), 'only <base href="/"> allowed: ' + base).toBe(true);
 });
 
 // ---------- 13: themes ----------

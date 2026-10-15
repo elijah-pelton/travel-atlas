@@ -6,6 +6,8 @@
     "./css/app.css",
     "./css/fonts.css",
     "./js/app.js",
+    "./js/accent.js",
+    "./js/vendor/qrcode.js",
     "./data/na.json",
     "./data/world.json",
     "./manifest.webmanifest",

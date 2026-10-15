@@ -20,3 +20,7 @@ These fonts are self-hosted in `fonts/` under the SIL Open Font License, Version
 - Bricolage Grotesque, by Mathieu Triay and the Bricolage Grotesque Project Authors
 - IBM Plex Sans, Copyright IBM Corp.
 - IBM Plex Mono, Copyright IBM Corp.
+
+## QR code generator
+
+qrcode-generator by Kazuhiko Arase, MIT License, vendored in `js/vendor/qrcode.js` (license header kept in the file).

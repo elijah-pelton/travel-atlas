@@ -1,0 +1,54 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "travel-atlas",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-13",
+  "upload_source_maps": false,
+  // Workers Logs: keep console.log/console.error, but no per-request invocation logs. Those
+  // record request metadata incl. headers, and the sync API's Authorization header carries the
+  // edit key. There is no config to drop headers only, so invocation logs are off entirely.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+
+  // Only the custom domain serves the Worker: no <name>.<subdomain>.workers.dev address and no
+  // per-version preview URLs (both would bypass the custom domain and its edge cache).
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // The app lives at the domain root.
+  "routes": [{ "pattern": "atlas.elijahpelton.com", "custom_domain": true }],
+
+  // The site files are the repo root; .assetsignore keeps everything that is not the public site out.
+  // Only /api/* runs Worker code; any other unknown path (e.g. /map/<id>) gets index.html.
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "travel-atlas",
+      // Remote D1 database created by the lead (wrangler d1 create travel-atlas).
+      "database_id": "2b69b672-a4f3-4161-878b-35c825d6408f",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Workers Rate Limiting: counters are per Cloudflare location, period 60 s (docs/SYNC.md).
+  // "per IP" means per IPv4 address or per IPv6 /64 (worker/net.js).
+  "ratelimits": [
+    { "name": "RL_CREATE", "namespace_id": "4101", "simple": { "limit": 5, "period": 60 } },   // POST /api/maps, per IP
+    { "name": "RL_WRITE", "namespace_id": "4102", "simple": { "limit": 10, "period": 60 } },   // sync/reset/delete with a correct key, per map ID
+    { "name": "RL_BADKEY", "namespace_id": "4103", "simple": { "limit": 10, "period": 60 } },  // failed key checks, per IP+map (then 429 for bad keys)
+    { "name": "RL_READ", "namespace_id": "4104", "simple": { "limit": 60, "period": 60 } },    // GET /api/maps/:id edge-cache misses, per IP
+    { "name": "RL_IPWRITE", "namespace_id": "4105", "simple": { "limit": 30, "period": 60 } }  // every sync/reset/delete attempt, per IP
+  ],
+
+  "vars": {
+    // "0" skips the limits keyed by IP alone (RL_CREATE, RL_READ, RL_IPWRITE). Only `npm run dev:test` sets it,
+    // because a local test suite sends every request from 127.0.0.1. Never set "0" in production.
+    "RL_IP_LIMITS": "1"
+  }
+}

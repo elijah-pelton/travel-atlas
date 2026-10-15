@@ -118,6 +118,9 @@
   .status[data-state="error"]::before { background: #c0392b; opacity: 1; }
   .status[role="button"] { cursor: pointer; color: var(--ink); }
   .status[role="button"]:hover { background: var(--panel-2); }
+  .status[data-state="offline"]::before { background: var(--muted); opacity: .9; }
+  .status[data-state="stopped"]::before { background: #c0392b; opacity: 1; flex: none; }
+  .status[data-state="stopped"] { cursor: pointer; color: var(--ink); }
   .status[data-state="connecting"]::before { animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 
@@ -279,8 +282,9 @@
   .btn.primary:hover { opacity: .9; background: var(--ink); }
   .btn[disabled] { opacity: .5; cursor: default; }
 
-  dialog#backup { border: 1px solid var(--rule); border-radius: 14px; padding: 0; background: var(--panel); color: var(--ink); width: min(560px, 94vw); box-shadow: var(--shadow); }
-  dialog#backup::backdrop { background: rgba(10, 16, 22, .45); }
+  dialog#backup, dialog.dlg-box { border: 1px solid var(--rule); border-radius: 14px; padding: 0; background: var(--panel); color: var(--ink); width: min(560px, 94vw); box-shadow: var(--shadow); }
+  dialog#backup::backdrop, dialog.dlg-box::backdrop { background: rgba(10, 16, 22, .45); }
+  dialog.dlg-box { max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain; }
   .dlg { padding: 18px 20px 20px; display: grid; gap: 10px; margin: 0; }
   .dlg-head { display: flex; align-items: center; justify-content: space-between; }
   .dlg-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin: 0; }
@@ -294,6 +298,18 @@
   .dlg-note { margin: 0; font-size: 13px; color: var(--muted); min-height: 1em; }
   .dlg-note.ok { color: var(--ok-ink); }
   .dlg-note.err { color: var(--err-ink); }
+  .dlg-input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--rule); background: var(--panel-2); color: var(--ink); font-size: 14px; }
+  .dlg-input.mono { font-family: var(--font-mono); font-size: 12.5px; }
+  .dlg-part { display: grid; gap: 10px; }
+  .dlg-part[hidden] { display: none; }
+  .dlg-note.warn { color: var(--err-ink); }
+  .dlg-note[hidden] { display: none; }
+  .btn.danger { color: var(--err-ink); }
+  /* QR code: always dark modules on a white quiet zone, whatever the theme, so any camera reads it */
+  .qr-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .qr-row .dlg-sub { flex: 1 1 180px; }
+  .qr { width: 184px; height: 184px; flex: none; background: #fff; border-radius: 10px; border: 1px solid var(--rule); display: grid; place-items: center; color: #5f6b75; font-size: 12px; }
+  .qr svg { display: block; width: 100%; height: 100%; border-radius: 9px; }
   .dlg-note .undo { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
   footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 12.5px; }
@@ -312,7 +328,12 @@
     .search input, .dlg textarea { font-size: 16px; }
     /* finger-sized targets */
     .zoom button { width: 40px; height: 40px; }
-    .dlg-head .x, .ios-hint .x { min-width: 40px; min-height: 40px; }
+    .dlg-head .x, .ios-hint .x, .note-bar .x { min-width: 40px; min-height: 40px; }
+    .dlg-input { font-size: 16px; }
+    .dlg-input.mono { font-size: 16px; }
+    #share .btn { min-height: 40px; }
+    #share .dlg { padding: 14px 14px 18px; }
+    .status[data-state="stopped"] { white-space: normal; }
     .chip { position: relative; margin: 7px 6px 7px 0; }
     .chip::after { content: ""; position: absolute; inset: -7px -3px; }
   }
@@ -362,6 +383,29 @@
     :root[data-theme="dark"] body::before { background: var(--bg); }
   }
   .ios-hint[hidden], .update-toast[hidden], .frame-loading[hidden] { display: none; }
+
+  /* view-only banner and one-line notes share the iOS hint's look */
+  .banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    margin: -6px 0 18px; padding: 8px 14px; border-radius: 10px; min-height: 42px;
+    background: var(--panel); border: 1px solid var(--rule); color: var(--ink); font-size: 13.5px; box-shadow: var(--shadow);
+  }
+  .banner[hidden], .status[hidden] { display: none; }
+  .banner a { color: inherit; text-decoration: underline; text-underline-offset: 2px; font-weight: 500; }
+  .banner .btn { padding: 4px 12px; }
+  .banner.err { color: var(--err-ink); }
+  .note-bar { padding: 6px 8px 6px 14px; flex-wrap: nowrap; }
+  .note-bar .x {
+    border: 0; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--muted); padding: 2px 8px; border-radius: 6px;
+  }
+  .note-bar .x:hover { color: var(--ink); background: var(--panel-2); }
+  body.view-only .owner { border-bottom-color: transparent; cursor: default; }
+  body.view-only .owner:hover { border-bottom-color: transparent; }
+  body.view-only .owner:empty { display: none; }
+  body.view-only svg.map .place, body.view-only svg.map .dot, body.view-only svg.map .dot-hit, body.view-only svg.map .inset-bg { cursor: default; }
+  body.view-only .chip { cursor: default; }
+  body.view-only .chip:hover { text-decoration: none; }
+  body.view-only .chip .x { display: none; }
 
   footer a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   footer a:hover { color: var(--ink); }

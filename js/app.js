@@ -16,7 +16,8 @@
   // ---------- registry ----------
   const places = new Map();        // id -> {id, name, kind, map}
   const nodes = new Map();         // id -> [svg elements]
-  const state = new Set();         // visited ids
+  const state = new Set();         // visited ids (in view-only mode: the shared map being viewed)
+  let viewOnly = false;            // true on /map/<id> when this device doesn't hold that map's edit key
   const KIND_LABEL = { state: 'U.S. state', dc: 'Federal district', territory: 'U.S. territory', province: 'Canada', country: 'Country', other: 'Territory' };
   const MAP_LABEL = { na: 'U.S. & Canada', world: 'World' };
 
@@ -102,7 +103,7 @@
       if (r.id !== 'ATA') label(labels, r);
     }
     // the sphere outline sits on top so the terrain has a crisp edge
-    el('path', { class: 'sphere', d: WORLD.sphere, style: 'fill:none', 'pointer-events': 'none' }, svg);
+    el('path', { class: 'sphere', d: WORLD.sphere, 'pointer-events': 'none' }, svg).style.fill = 'none';   // CSSOM, not a style="" attribute (CSP)
     return svg;
   }
 
@@ -266,6 +267,12 @@
     host.innerHTML = `<span class="lead">Been there (${names.length}):</span><span class="chips"></span>`;
     const chips = $('.chips', host);
     for (const p of names) {
+      if (viewOnly) {                            // someone else's map: names only, nothing to clear
+        const c = document.createElement('span');
+        c.className = 'chip'; c.innerHTML = '<span></span>'; c.firstChild.textContent = p.name;
+        chips.appendChild(c);
+        continue;
+      }
       const b = document.createElement('button');
       b.className = 'chip'; b.type = 'button'; b.title = 'Clear ' + p.name; b.setAttribute('aria-label', 'Remove ' + p.name);
       b.innerHTML = `<span></span><span class="x" aria-hidden="true">×</span>`;
@@ -283,6 +290,11 @@
   function paintAll() { for (const id of nodes.keys()) paint(id); updateCounters(); }
 
   function toggle(id, opts) {
+    if (viewOnly) {                              // a shared map seen from another device: look, don't touch
+      const p = places.get(id);
+      if (p && !(opts && opts.quiet)) toast(p.map, 'View only');
+      return state.has(id);
+    }
     const on = !state.has(id);
     if (on) state.add(id); else state.delete(id);
     paint(id); updateCounters(); persist(id, on);
@@ -551,21 +563,32 @@
   document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) showResults(false); });
 
   // ---------- persistence ----------
-  // Marks live in this browser's storage on this device. Backup (code or file) carries them elsewhere.
+  // Marks live in this browser's storage on this device first. Backup (code or file) carries them
+  // elsewhere; Share (opt-in) keeps a copy on the sync server so other devices can view or edit it.
   const LS_KEY = 'travel-atlas:v1', LS_T = 'travel-atlas:t', OWNER_KEY = 'travel-atlas:owner';
   const BACKUP_KEY = 'travel-atlas:lastBackup';            // ms timestamp of the last code copy / file download
-  const BACKUP_MIN = 5, BACKUP_MAX_AGE = 30 * 24 * 3600 * 1000;
+  const CLOCK_KEY = 'travel-atlas:clock';                  // {placeId: ms} when each place was last toggled here (on or off)
+  const OWNER_T_KEY = 'travel-atlas:ownerT';               // ms when the owner name last changed here
+  const LINK_KEY = 'travel-atlas:link';                    // {id, editKey, name, synced} once this device edits a shared map
+  const BACKUP_MIN = 5, BACKUP_MAX_AGE = 30 * 24 * 3600 * 1000, SYNC_FRESH = 30 * 24 * 3600 * 1000;
   const statusEl = $('#status'), owner = $('#owner');
   const STATUS = {
     saved: ['saved', 'Saved on this device', 'Your marks are kept in this browser on this device. Use Backup to move them to another phone or computer.'],
     remind: ['unsaved', 'Back up your marks', 'Your marks are kept only in this browser on this device. Copy a backup code or download a backup file so you don’t lose them.'],
     error: ['error', 'Can’t save here — use Backup', 'This browser isn’t letting the page store anything (private browsing or blocked site data), so marks will be lost when it closes. Copy a backup code or download a backup file.'],
+    synced: ['synced', 'Synced', 'Your marks are saved on this device and kept in step with your shared map.'],
+    syncing: ['saving', 'Syncing…', 'Your marks are saved on this device and are being sent to your shared map.'],
+    offline: ['offline', 'Offline · will sync', 'Your marks are saved on this device. They will sync with your shared map when you’re back online.'],
+    retry: ['offline', 'Sync paused · will retry', 'Your marks are saved on this device. The sync server didn’t answer, so the app will try again shortly.'],
+    reset: ['stopped', 'Edit access was reset — this device stopped syncing', 'Edit access to the shared map was reset on another device. Your marks are still here. Scan the new code from Share on that device to sync again.'],
+    deleted: ['stopped', 'This shared map was deleted', 'The shared copy of this map was deleted, so this device stopped syncing. Your marks are still here.'],
   };
-  let canSave = true;
+  let canSave = true, statusKey = '';
   function setStatus(s) {
     const [ds, text, title] = STATUS[s];
+    statusKey = s;
     statusEl.dataset.state = ds; statusEl.textContent = text; statusEl.title = title;
-    if (s === 'remind') { statusEl.setAttribute('role', 'button'); statusEl.tabIndex = 0; }
+    if (s === 'remind' || s === 'reset' || s === 'deleted') { statusEl.setAttribute('role', 'button'); statusEl.tabIndex = 0; }
     else { statusEl.removeAttribute('role'); statusEl.removeAttribute('tabindex'); }
   }
   function backupDue() {
@@ -574,7 +597,16 @@
     return !t || Date.now() - t > BACKUP_MAX_AGE;
   }
   // the error state wins; otherwise nudge for a backup once there's something worth keeping
-  function refreshStatus() { setStatus(!canSave ? 'error' : backupDue() ? 'remind' : 'saved'); }
+  // Linked devices show the sync state instead; they skip the reminder while they've synced in the last 30 days.
+  function refreshStatus() {
+    if (viewOnly) return;
+    if (link) {
+      const fresh = link.synced && Date.now() - link.synced < SYNC_FRESH;
+      setStatus(!fresh && backupDue() ? 'remind' : syncState);
+    } else if (unlinkReason) setStatus(unlinkReason);
+    else setStatus(!canSave ? 'error' : backupDue() ? 'remind' : 'saved');
+  }
+  function setSyncState(s) { syncState = s; refreshStatus(); }
   function markBackedUp() { LS_SAFE.set(BACKUP_KEY, String(Date.now())); refreshStatus(); }
 
   let lastChange = 0;                       // ms timestamp of the newest change
@@ -595,6 +627,7 @@
     return { v: Object.keys(o).filter(id => o[id] && places.has(id)), owner: LS_SAFE.get(OWNER_KEY) || '', t: +(LS_SAFE.get(LS_T) || 0) };
   }
   function saveLocal() {
+    if (viewOnly) return false;                  // someone else's map is never written to this device
     try {
       const o = {}; for (const id of state) o[id] = true;
       localStorage.setItem(LS_KEY, JSON.stringify(o)); localStorage.setItem(LS_T, String(lastChange));
@@ -631,16 +664,61 @@
   function pageTitle() { const n = ownerName(); return n ? `${n}’s Travel Atlas` : 'Travel Atlas'; }
   function syncTitle() { document.title = pageTitle(); }
 
-  applySnapshot(readLocal());
+  // ---------- sync: storage helpers, route ----------
+  function readJSON(k) { const raw = LS_SAFE.get(k); if (!raw) return null; try { return JSON.parse(raw); } catch (_) { return null; } }
+  function readLink() { const l = readJSON(LINK_KEY); return l && typeof l.id === 'string' && typeof l.editKey === 'string' ? l : null; }
+  function writeLink(l) { try { if (l) localStorage.setItem(LINK_KEY, JSON.stringify(l)); else localStorage.removeItem(LINK_KEY); } catch (_) {} }
+  function readClock() { const c = readJSON(CLOCK_KEY); return c && typeof c === 'object' && !Array.isArray(c) ? c : {}; }
+  function writeClock(c) { LS_SAFE.set(CLOCK_KEY, JSON.stringify(c)); }
+  const storedOwnerT = () => +(LS_SAFE.get(OWNER_T_KEY) || 0);
+
+  // /map/<id> (view, or same as / when this device holds that map's key), /map/<id>#edit=<key> (pairing),
+  // /#import=<atlas1 code>&owner=&accent=&style= (sent by the old address's forwarding page)
+  function parseRoute() {
+    const m = location.pathname.match(/^\/map\/([^/]+)\/?$/);
+    let id = null;
+    if (m) { try { id = decodeURIComponent(m[1]); } catch (_) { id = m[1]; } }
+    const h = new URLSearchParams(location.hash.replace(/^#/, ''));
+    return { mapId: id, editKey: id ? h.get('edit') : null, imp: !id && h.has('import') ? h : null };
+  }
+  const route = parseRoute();
+  // An edit key waiting to be checked (pairing offline). Kept in memory and in sessionStorage so a
+  // reload can retry, never in the address bar.
+  const PENDING_KEY = 'travel-atlas:pending-pair';
+  const SS = {
+    get() { try { const v = JSON.parse(sessionStorage.getItem(PENDING_KEY) || 'null'); return v && typeof v.id === 'string' && typeof v.key === 'string' ? v : null; } catch (_) { return null; } },
+    set(v) { try { if (v) sessionStorage.setItem(PENDING_KEY, JSON.stringify(v)); else sessionStorage.removeItem(PENDING_KEY); } catch (_) {} },
+  };
+  if (route.mapId && !route.editKey) { const pp = SS.get(); if (pp && pp.id === route.mapId) route.editKey = pp.key; }
+  let link = readLink();
+  let syncState = 'syncing', unlinkReason = null;
+  viewOnly = !!route.mapId && !route.editKey && !(link && link.id === route.mapId);
+
+  if (!viewOnly) applySnapshot(readLocal());
+  let persisted = new Set(state), ownerPersisted = ownerName();   // what this device last saved or adopted
   paintAll();
   syncTitle();
   canSave = probeStorage();
   refreshStatus();
 
+  // Every local change stamps the clock for the places (and owner name) it touched, on or off,
+  // so the server can merge place by place and a deliberate removal beats an older add.
+  function stampClock(now) {
+    const changed = [];
+    for (const id of state) if (!persisted.has(id)) changed.push(id);
+    for (const id of persisted) if (!state.has(id)) changed.push(id);
+    if (changed.length) { const c = readClock(); for (const id of changed) c[id] = now; writeClock(c); }
+    persisted = new Set(state);
+    const n = ownerName();
+    if (n !== ownerPersisted) { LS_SAFE.set(OWNER_T_KEY, String(now)); ownerPersisted = n; }
+  }
   function markDirty() {
+    if (viewOnly) return;
     lastChange = Date.now();
+    stampClock(lastChange);                      // local save always happens first; sync follows
     if (saveLocal()) askPersist();
     syncTitle();
+    if (link) { setSyncState(navigator.onLine === false ? 'offline' : 'syncing'); scheduleSync(1000); }
   }
   function persist() { markDirty(); }
 
@@ -657,7 +735,7 @@
   // saves a name that is still being typed. Re-saving the whole in-memory set here would let a stale
   // tab or window overwrite newer marks made elsewhere (another tab, or the installed app).
   function saveIfUnsaved() { if (editingOwner()) commitOwner(); }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveIfUnsaved(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveIfUnsaved(); else onWake(); });
   window.addEventListener('pagehide', saveIfUnsaved);
 
   // ---------- backup & restore ----------
@@ -717,9 +795,10 @@
   }
   $('#backup-btn').addEventListener('click', openBackup);
   // the "Back up your marks" pill opens the Backup dialog
-  statusEl.addEventListener('click', () => { if (statusEl.getAttribute('role') === 'button') openBackup(); });
+  function pillAction() { if (statusKey === 'reset' || statusKey === 'deleted') openShare(); else openBackup(); }
+  statusEl.addEventListener('click', () => { if (statusEl.getAttribute('role') === 'button') pillAction(); });
   statusEl.addEventListener('keydown', e => {
-    if ((e.key === 'Enter' || e.key === ' ') && statusEl.getAttribute('role') === 'button') { e.preventDefault(); openBackup(); }
+    if ((e.key === 'Enter' || e.key === ' ') && statusEl.getAttribute('role') === 'button') { e.preventDefault(); pillAction(); }
   });
   $('#copy-code').addEventListener('click', async () => {
     codeOut.focus(); codeOut.select();
@@ -789,6 +868,15 @@
   // keeping (and later re-saving) a stale copy.
   window.addEventListener('storage', e => {
     if (e.storageArea && e.storageArea !== localStorage) return;
+    if (viewOnly) return;                                  // viewing someone else's map: this device's marks don't apply
+    if (e.key === LINK_KEY || e.key === null) {            // another tab linked, unlinked, re-keyed or synced
+      const was = link; link = readLink();
+      if (!link) { clearTimeout(syncTimer); syncTimer = 0; }
+      else if (!was || was.id !== link.id || was.editKey !== link.editKey) { unlinkReason = null; scheduleSync(0); }
+      refreshStatus();
+      if (shareDlg.open) renderShare();
+      if (e.key === LINK_KEY) return;
+    }
     if (e.key !== null && e.key !== LS_KEY && e.key !== LS_T && e.key !== OWNER_KEY && e.key !== BACKUP_KEY) return;
     if (e.key === BACKUP_KEY) { refreshStatus(); return; }
     const snap = readLocal();
@@ -796,6 +884,7 @@
     lastChange = snap.t || 0;
     if (editingOwner()) ownerWas = snap.owner || '';     // don't yank text out from under the cursor
     else { owner.textContent = snap.owner || ''; ownerWas = ownerName(); }
+    persisted = new Set(state); ownerPersisted = snap.owner || '';   // the other tab already stamped the clock
     syncTitle();
     paintAll(); refreshResults();
     undoRestore = null;                                    // an undo would now overwrite the other tab's work
@@ -803,4 +892,454 @@
     canSave = probeStorage();
     refreshStatus();
   });
+
+  // ---------- sync with a shared map (opt-in; see docs/SYNC.md) ----------
+  // Every request goes to this site's own /api (same origin). 10 s timeout. Never throws:
+  // status 0 means offline / network error / timeout.
+  async function api(method, path, body, key) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = setTimeout(() => { if (ctl) ctl.abort(); }, 10000);
+    try {
+      const headers = {};
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      if (key) headers.Authorization = 'Bearer ' + key;
+      const res = await fetch('./api/' + path, {
+        method, headers, cache: 'no-store', credentials: 'omit',
+        body: body === undefined ? undefined : JSON.stringify(body), signal: ctl ? ctl.signal : undefined,
+      });
+      let data = null;
+      if (res.status !== 204) { try { data = await res.json(); } catch (_) {} }
+      return { status: res.status, ok: res.ok, data };
+    } catch (_) {
+      return { status: 0, ok: false, data: null };
+    } finally { clearTimeout(timer); }
+  }
+  const mapPath = id => 'maps/' + encodeURIComponent(id);
+
+  // Everything this device has an opinion on: marks -> [1, t] (t = 1 when marked before sync existed),
+  // clock entries for unmarked places -> [0, t]. Plus the committed owner name.
+  function outgoing() {
+    const clock = readClock(), out = {};
+    for (const id in clock) {
+      const t = Math.floor(+clock[id]);
+      if (places.has(id) && !state.has(id) && t > 0) out[id] = [0, t];
+    }
+    for (const id of state) { const t = Math.floor(+clock[id] || 0); out[id] = [1, t > 0 ? t : 1]; }
+    const body = { places: out };
+    const t = storedOwnerT();
+    if (ownerPersisted || t) body.owner = [ownerPersisted, t || 1];
+    return body;
+  }
+
+  // Take the server's merged state. A place changed here after the request went out (newer local t)
+  // is kept and goes up with the next sync. replaceAll: adopt the map as-is (switching maps).
+  function adoptRemote(m, replaceAll) {
+    const remote = (m && m.places) || {};
+    const clock = replaceAll ? {} : readClock();
+    const before = new Set(state), ownerBefore = ownerName();
+    if (replaceAll) state.clear();
+    for (const id in remote) {
+      const e = remote[id];
+      if (!places.has(id) || !Array.isArray(e)) continue;
+      const t = +e[1] || 0;
+      const lt = replaceAll ? 0 : (+clock[id] || (state.has(id) ? 1 : 0));
+      if (t < lt) continue;
+      clock[id] = t;
+      if (e[0] === 1) state.add(id); else state.delete(id);
+    }
+    writeClock(clock);
+    persisted = new Set(state);
+    const rt = +m.ownerT || 0;
+    if (typeof m.owner === 'string' && (replaceAll || rt > storedOwnerT()) && !editingOwner()) {
+      owner.textContent = m.owner.replace(/\s+/g, ' ').trim().slice(0, 40);
+      ownerWas = ownerPersisted = ownerName();
+      LS_SAFE.set(OWNER_T_KEY, String(rt));
+    }
+    const changed = ownerName() !== ownerBefore || before.size !== state.size || [...state].some(id => !before.has(id));
+    if (changed) {
+      lastChange = Date.now();
+      saveLocal();                                   // other tabs pick this up through their storage listener
+      paintAll(); refreshResults(); syncTitle();
+      undoRestore = null;
+      if (dlg.open) codeOut.value = makeCode();
+    }
+    return changed;
+  }
+
+  let syncTimer = 0, syncBusy = false, syncAgain = false, retryDelay = 0;
+  function scheduleSync(ms) {
+    if (!link || viewOnly) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(runSync, ms || 0);
+  }
+  async function runSync() {
+    syncTimer = 0;
+    if (!link || viewOnly) return;
+    if (syncBusy) { syncAgain = true; return; }
+    if (navigator.onLine === false) { setSyncState('offline'); return; }   // 'online' brings us back
+    const sent = link;
+    syncBusy = true; setSyncState('syncing');
+    const r = await api('POST', mapPath(sent.id) + '/sync', outgoing(), sent.editKey);
+    syncBusy = false;
+    const again = syncAgain; syncAgain = false;
+    if (!link || link.id !== sent.id || link.editKey !== sent.editKey) { if (link) scheduleSync(0); return; }
+    if (r.ok && r.data && r.data.places) {
+      retryDelay = 0;
+      adoptRemote(r.data, false);
+      link = Object.assign({}, link, { name: r.data.name || link.name, synced: Date.now() });
+      writeLink(link);
+      setSyncState('synced');
+      if (again) scheduleSync(1000);
+      if (shareDlg.open) renderShare();
+    } else if (r.status === 401) {
+      unlink('reset');
+    } else if (r.status === 404) {
+      unlink('deleted');
+    } else {                                          // offline, timeout, 429, 5xx: keep working locally, retry later
+      retryDelay = Math.min(60000, retryDelay ? retryDelay * 2 : 5000);
+      setSyncState(r.status === 0 ? 'offline' : 'retry');
+      scheduleSync(again ? 1000 : retryDelay);
+    }
+  }
+  // Stop syncing on this device. Marks (and their clock) stay here.
+  function unlink(reason) {
+    link = null; writeLink(null);
+    clearTimeout(syncTimer); syncTimer = 0; retryDelay = 0;
+    unlinkReason = reason || null;
+    if (/^\/map\//.test(location.pathname)) history.replaceState(null, '', '/');
+    refreshStatus();
+    if (shareDlg.open) { renderShare(); if (reason) note(shareNote, STATUS[reason][1] + '.', 'err'); }
+  }
+
+  // ---------- one-line notes ----------
+  const noteBar = $('#note-bar'), noteText = $('#note-text');
+  function showNote(msg) { noteText.textContent = msg; noteBar.hidden = false; }
+  $('#note-close').addEventListener('click', () => { noteBar.hidden = true; });
+
+  // ---------- view only: /map/<id> on a device without that map's key ----------
+  const viewBanner = $('#view-banner');
+  let viewId = null, viewLoaded = false, viewBusy = false;
+  function viewMessage(parts, err) {
+    viewBanner.innerHTML = '';
+    viewBanner.classList.toggle('err', !!err);
+    const line = document.createElement('span');
+    for (const p of parts) line.append(p);
+    viewBanner.appendChild(line);
+    viewBanner.hidden = false;
+  }
+  function ownLink() { const a = document.createElement('a'); a.href = './'; a.textContent = 'Make your own atlas'; return a; }
+  function enterViewMode(id) {
+    viewOnly = true; viewId = id; viewLoaded = false;
+    clearTimeout(syncTimer); syncTimer = 0;
+    document.body.classList.add('view-only');
+    owner.contentEditable = 'false';
+    for (const a of ['role', 'aria-label', 'title', 'tabindex']) owner.removeAttribute(a);
+    owner.textContent = '';
+    $('.masthead .sub').textContent = 'Someone shared their Travel Atlas with you. Look around and zoom in; only they can change it.';
+    $('#backup-btn').hidden = true; $('#share-btn').hidden = true; statusEl.hidden = true;
+    if (dlg.open) dlg.close();
+    if (shareDlg.open) shareDlg.close();
+    state.clear(); paintAll(); refreshResults(); syncTitle();
+    viewMessage(['Loading shared map…']);
+    loadView();
+  }
+  async function loadView() {
+    if (!viewId || viewBusy) return;
+    viewBusy = true;
+    const r = await api('GET', mapPath(viewId));
+    viewBusy = false;
+    if (r.ok && r.data && r.data.places) {
+      state.clear();
+      for (const id in r.data.places) { const e = r.data.places[id]; if (places.has(id) && Array.isArray(e) && e[0] === 1) state.add(id); }
+      const who = String(r.data.owner || r.data.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      owner.textContent = who;
+      syncTitle();
+      viewMessage([(who ? who + '’s map' : 'Shared map') + ' · view only · ', ownLink()]);
+      paintAll(); refreshResults();
+      viewLoaded = true;
+    } else if (r.status === 404 || r.status === 400) {
+      state.clear(); owner.textContent = ''; syncTitle(); paintAll(); refreshResults();
+      viewLoaded = false;
+      viewMessage(['Couldn’t load this map. The link may be wrong, or the map was deleted. · ', ownLink()], true);
+    } else if (!viewLoaded) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn'; b.textContent = 'Try again';
+      b.addEventListener('click', () => { viewMessage(['Loading shared map…']); loadView(); });
+      viewMessage([navigator.onLine === false ? 'Couldn’t load this map — you’re offline. ' : 'Couldn’t load this map. Check your connection. ', b], true);
+    }                                                // already showing it: keep the last copy quietly
+  }
+
+  // ---------- pairing: /map/<id>#edit=<key> ----------
+  let pendingPair = null;
+  function clearPending() { pendingPair = null; SS.set(null); }
+  let pairBusy = false;
+  async function pair(id, key) {
+    if (pairBusy) return;
+    pairBusy = true;
+    try { await pairOnce(id, key); } finally { pairBusy = false; }
+  }
+  async function pairOnce(id, key) {
+    pendingPair = { id, key };
+    SS.set(pendingPair);
+    // the key never stays in the address bar, even if the server can't be reached yet
+    history.replaceState(null, '', '/map/' + encodeURIComponent(id));
+    setStatus('syncing');
+    const r = await api('POST', mapPath(id) + '/sync', { places: {} }, key);   // checks the key, changes nothing
+    if (r.status === 0 || r.status === 429 || r.status >= 500) {
+      showNote('Couldn’t reach the sync server to add this device. It will try again when you’re online.');
+      refreshStatus();
+      return;                                         // kept in pendingPair; retried on online / visible
+    }
+    clearPending();
+    if (r.ok && r.data && r.data.places) {
+      const name = r.data.name || id;
+      const cur = link;
+      if (cur && cur.id !== id) {
+        const ok = window.confirm(`This device already syncs with “${cur.name || cur.id}”.\n\nSwitch to “${name}”? The marks on this device will be replaced with that map’s marks.`);
+        history.replaceState(null, '', '/');
+        if (!ok) { showNote(`Kept syncing with “${cur.name || cur.id}”.`); refreshStatus(); return; }
+        link = { id, editKey: key, name, synced: Date.now() };
+        writeLink(link); unlinkReason = null;
+        adoptRemote(r.data, true);
+        setSyncState('synced');
+        showNote(`This device now syncs with “${name}”.`);
+        return;
+      }
+      // A device that isn't syncing yet: ask before its own marks go into someone's shared map.
+      if (!cur && (state.size || ownerName())) {
+        const what = state.size ? `your ${plural(state.size, 'place', 'places')}` : 'your name';
+        if (!window.confirm(`Add ${what} to “${name}”? Anyone with this map’s edit link can change them.`)) {
+          enterViewMode(id);                          // nothing uploaded, no link stored
+          return;
+        }
+      }
+      link = { id, editKey: key, name };
+      writeLink(link); unlinkReason = null;
+      history.replaceState(null, '', '/');
+      showNote(`This device now syncs with “${name}”.` + (state.size ? ' The marks that were here have been added to it.' : ''));
+      setSyncState('syncing');
+      runSync();                                      // full sync: this device's marks merge into the shared map
+      return;
+    }
+    // the key doesn't work (reset, or a bad link) or the map is gone
+    history.replaceState(null, '', '/map/' + encodeURIComponent(id));
+    if (link && link.id === id) { showNote('That edit link no longer works.'); refreshStatus(); scheduleSync(0); return; }
+    enterViewMode(id);
+    if (r.status === 401) showNote('That edit link no longer works (edit access was reset). You can still view the map.');
+  }
+
+  // ---------- import from the old address: /#import=<atlas1 code>&owner=&accent=&style= ----------
+  function runImport(h) {
+    const parsed = parseCode(h.get('import') || '');
+    let added = 0;
+    if (parsed) for (const id of parsed.ids) if (!state.has(id)) { state.add(id); added++; }   // adds, never removes
+    let ownerSet = false;
+    const o = (h.get('owner') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (o && !ownerName()) { owner.textContent = o; ownerWas = ownerName(); ownerSet = true; }
+    const a = h.get('accent');
+    if (a && ACCENTS.includes(a) && LS_SAFE.get(ACCENT_KEY) === null) setAccent(a, true);
+    const st = h.get('style');
+    if ((st === 'flat' || st === 'real') && LS_SAFE.get(STYLE_KEY) === null) setStyle(st, true);
+    history.replaceState(null, '', location.pathname + location.search);
+    if (added || ownerSet) { paintAll(); refreshResults(); markDirty(); }
+    showNote(added ? `Brought over ${plural(added, 'place', 'places')} from your old Travel Atlas address.`
+      : parsed && parsed.ids.length ? 'Your marks from the old address were already here.' : 'Nothing to bring over from the old address.');
+  }
+
+  // ---------- Share dialog ----------
+  const shareDlg = $('#share'), shareOff = $('#share-off'), shareOn = $('#share-on'), shareName = $('#share-name');
+  const shareView = $('#share-view'), shareNote = $('#share-note'), shareCopyNote = $('#share-copy-note');
+  const shareQR = $('#share-qr'), shareWarn = $('#share-edit-warn'), shareSub = $('#share-sub'), shareNative = $('#share-native');
+  const shareButtons = [...shareDlg.querySelectorAll('.dlg-part .btn')];
+  const viewUrl = l => location.origin + '/map/' + encodeURIComponent(l.id);
+  const editUrl = l => viewUrl(l) + '#edit=' + l.editKey;
+  function shareBusy(on) { for (const b of shareButtons) b.disabled = on; }
+  function renderShare() {
+    const on = !!link;
+    shareOff.hidden = on; shareOn.hidden = !on;
+    if (!on) { qrFor = ''; shareQR.innerHTML = ''; return; }
+    shareSub.textContent = `This map syncs as “${link.name || link.id}”. Marks made on any device you add show up on the others. Share the view link with anyone; they can look but not change anything.`;
+    shareView.value = viewUrl(link);
+    shareNative.hidden = typeof navigator.share !== 'function';
+    renderQR();
+  }
+  function openShare() {
+    if (viewOnly) return;
+    note(shareNote, !link && unlinkReason ? STATUS[unlinkReason][1] + '.' : '', !link && unlinkReason ? 'err' : '');
+    note(shareCopyNote, ''); shareWarn.hidden = true; shareBusy(false);
+    if (!link) shareName.value = ownerName();
+    if (typeof shareDlg.showModal === 'function') { if (!shareDlg.open) shareDlg.showModal(); } else shareDlg.setAttribute('open', '');
+    renderShare();
+    if (!link) shareName.focus();
+  }
+  $('#share-btn').addEventListener('click', openShare);
+  shareDlg.addEventListener('click', e => { if (e.target === shareDlg) shareDlg.close(); });
+  shareName.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#share-create').click(); } });
+
+  // QR code of the edit link, drawn on this device (vendored qrcode-generator, loaded on first use).
+  // Always black modules on a white quiet zone so it scans in dark mode too.
+  let qrLib = null, qrFor = '';
+  function loadQRLib() {
+    if (typeof window.qrcode === 'function') return Promise.resolve();
+    if (!qrLib) qrLib = new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = './js/vendor/qrcode.js';
+      sc.onload = () => (typeof window.qrcode === 'function' ? res() : rej(new Error('qrcode missing')));
+      sc.onerror = () => { qrLib = null; sc.remove(); rej(new Error('qrcode failed to load')); };
+      document.head.appendChild(sc);
+    });
+    return qrLib;
+  }
+  function qrSvg(text) {
+    const qr = window.qrcode(0, 'M');
+    qr.addData(text); qr.make();
+    const n = qr.getModuleCount(), q = 4, size = n + 2 * q;
+    let d = '';
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (!qr.isDark(r, c)) continue;
+        let w = 1; while (c + w < n && qr.isDark(r, c + w)) w++;
+        d += `M${c + q} ${r + q}h${w}v1h${-w}z`;
+        c += w - 1;
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" aria-hidden="true" focusable="false"><rect width="${size}" height="${size}" fill="#ffffff"/><path d="${d}" fill="#000000"/></svg>`;
+  }
+  async function renderQR() {
+    if (!link) return;
+    const url = editUrl(link);
+    if (qrFor === url && shareQR.querySelector('svg')) return;
+    qrFor = url;
+    shareQR.textContent = 'Making code…';
+    try { await loadQRLib(); } catch (_) {
+      if (qrFor === url) { qrFor = ''; shareQR.textContent = 'Couldn’t make the code here. Use “Copy edit link instead”.'; }
+      return;
+    }
+    if (!link || editUrl(link) !== url) return;
+    shareQR.innerHTML = qrSvg(url);
+  }
+
+  async function copyText(text, input) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (_) {}
+    let tmp = null;
+    try {
+      if (!input) {                                  // inside the modal dialog, so the selection is allowed
+        tmp = document.createElement('textarea');
+        tmp.value = text; tmp.setAttribute('readonly', ''); tmp.style.position = 'fixed'; tmp.style.opacity = '0';
+        shareDlg.querySelector('form').appendChild(tmp);
+        input = tmp;
+      }
+      input.focus(); input.select();
+      return document.execCommand('copy');
+    } catch (_) { return false; } finally { if (tmp) tmp.remove(); }
+  }
+  function errText(r, what) {
+    if (r.status === 0) return what + '. Check your connection and try again.';
+    if (r.status === 429) return what + ' — too many tries. Wait a minute and try again.';
+    if (r.data && r.data.message) return what + ': ' + r.data.message;
+    return what + '. Try again in a moment.';
+  }
+
+  $('#share-create').addEventListener('click', async () => {
+    if (link) { renderShare(); return; }
+    const name = shareName.value.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!name) { note(shareNote, 'Give the link a name first.', 'err'); shareName.focus(); return; }
+    if (editingOwner()) commitOwner();
+    shareBusy(true); note(shareNote, 'Creating link…');
+    const out = outgoing(), body = { name, places: out.places };
+    if (out.owner) { body.owner = out.owner[0]; body.ownerT = out.owner[1]; }
+    const r = await api('POST', 'maps', body);
+    shareBusy(false);
+    if (r.ok && r.data && r.data.id && r.data.editKey) {
+      link = { id: r.data.id, editKey: r.data.editKey, name: (r.data.map && r.data.map.name) || name, synced: Date.now() };
+      writeLink(link); unlinkReason = null; retryDelay = 0;
+      if (r.data.map) adoptRemote(r.data.map, false);
+      setSyncState('synced');
+      renderShare();
+      note(shareNote, 'Link created. This device now syncs with it.', 'ok');
+      scheduleSync(0);                               // catches anything changed while the request was out
+    } else {
+      note(shareNote, errText(r, 'Couldn’t create the link'), 'err');
+    }
+  });
+  $('#share-copy').addEventListener('click', async () => {
+    if (!link) return;
+    const ok = await copyText(viewUrl(link), shareView);
+    note(shareCopyNote, ok ? 'Copied.' : 'Couldn’t copy automatically — select the link and copy it.', ok ? 'ok' : 'err');
+  });
+  shareNative.addEventListener('click', () => {
+    if (!link || typeof navigator.share !== 'function') return;
+    Promise.resolve(navigator.share({ title: pageTitle(), url: viewUrl(link) })).catch(() => {});
+  });
+  $('#share-copy-edit').addEventListener('click', async () => {
+    if (!link) return;
+    shareWarn.hidden = false;
+    const ok = await copyText(editUrl(link));
+    note(shareNote, ok ? 'Edit link copied. Open it on your other device.' : 'Couldn’t copy automatically — scan the QR code instead.', ok ? 'ok' : 'err');
+  });
+  $('#share-reset').addEventListener('click', async () => {
+    if (!link) return;
+    if (!window.confirm('Reset edit access?\n\nThe old edit link and QR code stop working. Your other devices stop syncing until you add them again with the new code.')) return;
+    const l = link;
+    shareBusy(true); note(shareNote, 'Resetting edit access…');
+    const r = await api('POST', mapPath(l.id) + '/reset-key', {}, l.editKey);
+    shareBusy(false);
+    if (r.ok && r.data && r.data.editKey) {
+      if (!link || link.id !== l.id) return;
+      link = Object.assign({}, link, { editKey: r.data.editKey });
+      writeLink(link);
+      renderShare();
+      note(shareNote, 'Edit access reset. Add your other devices again with the new code.', 'ok');
+    } else if (r.status === 401) unlink('reset');
+    else if (r.status === 404) unlink('deleted');
+    else note(shareNote, errText(r, 'Couldn’t reset edit access'), 'err');
+  });
+  $('#share-stop').addEventListener('click', () => {
+    if (!link) return;
+    if (!window.confirm('Stop syncing on this device?\n\nYour marks stay here. The shared map and your other devices are not changed.')) return;
+    unlink(null);
+    renderShare();
+    note(shareNote, 'This device no longer syncs. Your marks are still here.', 'ok');
+  });
+  $('#share-delete').addEventListener('click', async () => {
+    if (!link) return;
+    if (!window.confirm('Delete the shared map?\n\nThe copy on atlas.elijahpelton.com is removed, the view link stops working, and other devices stop syncing. Your marks stay on this device.')) return;
+    const l = link;
+    shareBusy(true); note(shareNote, 'Deleting…');
+    const r = await api('DELETE', mapPath(l.id), undefined, l.editKey);
+    shareBusy(false);
+    if (r.ok || r.status === 404) {
+      unlink(null); renderShare();
+      note(shareNote, 'Shared map deleted. Your marks are still on this device.', 'ok');
+    } else if (r.status === 401) unlink('reset');
+    else note(shareNote, errText(r, 'Couldn’t delete the shared map'), 'err');
+  });
+
+  // ---------- sync triggers ----------
+  // 1 s after a change (markDirty), on startup, when back online, when the page becomes visible,
+  // and every 60 s while visible.
+  function onWake() {
+    if (viewOnly) { loadView(); return; }
+    if (pendingPair) { pair(pendingPair.id, pendingPair.key); return; }
+    if (link) scheduleSync(0);
+  }
+  window.addEventListener('online', onWake);
+  window.addEventListener('offline', () => { if (link && !viewOnly) setSyncState('offline'); });
+  setInterval(() => { if (document.visibilityState === 'visible') onWake(); }, 60000);
+
+  // The same links can arrive without a page load (same-document hash change, e.g. pasted into
+  // the address bar of an open tab): handle them the same way.
+  window.addEventListener('hashchange', () => {
+    const r = parseRoute();
+    if (r.editKey && r.mapId) { if (viewOnly) location.reload(); else pair(r.mapId, r.editKey); }
+    else if (r.imp && !viewOnly) runImport(r.imp);
+  });
+
+  // ---------- startup ----------
+  if (viewOnly) enterViewMode(route.mapId);
+  else if (route.editKey) pair(route.mapId, route.editKey);
+  else {
+    if (route.imp) runImport(route.imp);
+    if (link) scheduleSync(0);
+  }
 })();

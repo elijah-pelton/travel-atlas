@@ -1,0 +1,29 @@
+# Files at the repo root that must NOT be published as static assets (gitignore syntax).
+# Published: index.html, manifest.webmanifest, sw.js, css/, js/, data/, terrain/, fonts/, icons/.
+
+# Tooling, tests, server code, docs
+node_modules
+tests
+tools
+worker
+migrations
+redirect
+docs
+.claude
+.wrangler
+test-results
+playwright-report
+.playwright
+
+# Repo and config files
+.git*
+.assetsignore
+.nojekyll
+.DS_Store
+/*.md
+/LICENSE
+package.json
+package-lock.json
+wrangler.jsonc
+*.log
+travel-atlas-backup-*.json

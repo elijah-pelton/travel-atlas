@@ -11,7 +11,7 @@ const REPO = path.resolve(here, '..');
 const STAMP = path.join(REPO, 'tools', 'stamp-sw.py');
 const TMP_BASE = '/private/tmp/claude-501';
 const ALT_PORT = 8790;
-const ALT_URL = `http://127.0.0.1:${ALT_PORT}/travel-atlas/`;
+const ALT_URL = `http://127.0.0.1:${ALT_PORT}/`; // the copy is served at the root of its own port
 const TERRAIN_FILES = 9;
 
 // ---------- helpers ----------
@@ -25,10 +25,10 @@ function swVersion(root) {
   return m && m[1];
 }
 
-/** Copy the site (without tests, git, local tooling) to <parent>/travel-atlas. */
+/** Copy the site (without tests, git, local tooling and wrangler state) to <parent>/travel-atlas. */
 function copySite(parent) {
   const dest = path.join(parent, 'travel-atlas');
-  const skip = new Set(['tests', '.git', '.claude', 'node_modules']);
+  const skip = new Set(['tests', '.git', '.claude', 'node_modules', '.wrangler']);
   fs.cpSync(REPO, dest, {
     recursive: true,
     filter: (src) => !skip.has(path.basename(src)) || path.dirname(src) !== REPO,
@@ -181,8 +181,10 @@ test.describe('update flow', () => {
     // first sw.js so the re-stamp below (often within the same second) is seen as modified.
     const past = new Date(Date.now() - 60_000);
     fs.utimesSync(path.join(site, 'sw.js'), past, past);
+    // Static copy at the root of its own port, like the Worker's assets at the domain root.
+    // No API here: an unlinked device never calls it.
     server = spawn('python3', ['-m', 'http.server', String(ALT_PORT), '--bind', '127.0.0.1'],
-      { cwd: parent, stdio: 'ignore' });
+      { cwd: site, stdio: 'ignore' });
     const deadline = Date.now() + 15000;
     for (;;) {
       try { if ((await fetch(ALT_URL)).ok) break; } catch (_) { /* not up yet */ }

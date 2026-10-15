@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+<base href="/">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Travel Atlas</title>
@@ -15,7 +16,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Atlas">
-<script>try { var a = localStorage.getItem('travel-atlas:accent'); if (a && a !== 'amber') document.documentElement.setAttribute('data-accent', a); } catch (e) {}</script>
+<script src="./js/accent.js"></script>
 <link rel="stylesheet" href="./css/fonts.css">
 <link rel="stylesheet" href="./css/app.css">
 </head>
@@ -50,12 +51,15 @@
       </div>
       <span class="status" id="status" data-state="connecting" title="">Loading…</span>
       <button type="button" class="btn" id="backup-btn">Backup</button>
+      <button type="button" class="btn" id="share-btn">Share</button>
       <button type="button" class="btn" id="install-btn" hidden>Install</button>
     </div>
   </header>
+  <div class="banner" id="view-banner" role="status" hidden></div>
+  <div class="banner note-bar" id="note-bar" role="status" hidden><span id="note-text"></span><button type="button" class="x" id="note-close" aria-label="Dismiss" title="Dismiss">×</button></div>
   <div class="ios-hint" id="ios-hint" role="note" hidden><span>To install: Share → Add to Home Screen. Install before marking — marks made in Safari don’t move to the installed app (use Backup to carry them).</span><button type="button" class="x" id="ios-hint-close" aria-label="Dismiss" title="Dismiss">×</button></div>
 
-  <dialog id="backup" aria-labelledby="backup-title">
+  <dialog id="backup" class="dlg-box" aria-labelledby="backup-title">
     <form method="dialog" class="dlg">
       <div class="dlg-head"><h2 id="backup-title">Backup &amp; restore</h2><button type="submit" class="x" aria-label="Close">×</button></div>
       <p class="dlg-sub">Your marks live on this device. Copy the code or download a file to keep a backup or move your marks to another phone or computer. Paste a code and press Restore, or choose a backup file, to bring marks back.</p>
@@ -71,6 +75,38 @@
         <label class="dlg-check"><input type="checkbox" id="restore-replace"> Replace my current marks instead of adding to them</label>
       </div>
       <p class="dlg-note" id="restore-note"></p>
+    </form>
+  </dialog>
+
+  <dialog id="share" class="dlg-box" aria-labelledby="share-title">
+    <form method="dialog" class="dlg">
+      <div class="dlg-head"><h2 id="share-title">Share &amp; sync</h2><button type="submit" class="x" aria-label="Close">×</button></div>
+      <div class="dlg-part" id="share-off">
+        <p class="dlg-sub">Create a link to keep this map in step on your other phones and computers, and to show it to friends. A copy of your marks and name is stored on atlas.elijahpelton.com. Anyone with the view link can look at the map; only devices you add can change it. You can stop syncing or delete the copy at any time.</p>
+        <label class="dlg-label" for="share-name">Name for the link</label>
+        <input type="text" id="share-name" class="dlg-input" maxlength="40" autocomplete="off" spellcheck="false" placeholder="e.g. Sam">
+        <div class="dlg-row"><button type="button" class="btn primary" id="share-create">Create link</button></div>
+      </div>
+      <div class="dlg-part" id="share-on" hidden>
+        <p class="dlg-sub" id="share-sub"></p>
+        <label class="dlg-label" for="share-view">View link</label>
+        <input type="text" id="share-view" class="dlg-input mono" readonly spellcheck="false">
+        <div class="dlg-row"><button type="button" class="btn primary" id="share-copy">Copy</button><button type="button" class="btn" id="share-native" hidden>Share</button><span class="dlg-note" id="share-copy-note"></span></div>
+        <div class="dlg-label">Add a device</div>
+        <div class="qr-row">
+          <div class="qr" id="share-qr" role="img" aria-label="QR code of the edit link"></div>
+          <p class="dlg-sub">Scan with the other device’s camera. It opens this map there and keeps both devices in sync.</p>
+        </div>
+        <div class="dlg-row"><button type="button" class="btn" id="share-copy-edit">Copy edit link instead</button></div>
+        <p class="dlg-note warn" id="share-edit-warn" hidden>Anyone with this link can change your map.</p>
+        <div class="dlg-label">Manage</div>
+        <div class="dlg-row">
+          <button type="button" class="btn" id="share-reset">Reset edit access</button>
+          <button type="button" class="btn" id="share-stop">Stop syncing on this device</button>
+          <button type="button" class="btn danger" id="share-delete">Delete shared map</button>
+        </div>
+      </div>
+      <p class="dlg-note" id="share-note" role="status"></p>
     </form>
   </dialog>
 
@@ -109,7 +145,7 @@
   </section>
 
   <footer>
-    <p>Your marks are saved on this device. Use Backup to move them to another phone or computer.</p>
+    <p>Your marks are saved on this device. Your map is shared only if you create a link with Share.</p>
     <p>Map data: Natural Earth 1:50m (public domain). Equal Earth projection for the world; Albers equal-area conic for North America. Country count follows the 193 UN members plus Vatican City, Kosovo, and Taiwan. Terrain: Natural Earth I shaded relief.</p>
     <p><a href="https://github.com/elijah-pelton/travel-atlas">Source on GitHub</a></p>
   </footer>

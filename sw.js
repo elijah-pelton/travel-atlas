@@ -9,7 +9,9 @@
  * Nothing refreshes on its own.
  *
  * Strategies (same-origin GET only; everything else goes straight to the network):
- *   navigations to the app   cache-first from this version's precached ./index.html, so the
+ *   ./api/*                  never handled here (no respondWith): network only, never cached
+ *   navigations to the app   (./, ./index.html and ./map/<id>, which is the same app page)
+ *                            cache-first from this version's precached ./index.html, so the
  *                            page and its CSS/JS always come from the same version; network
  *                            only if the cache is missing it. Never written from here.
  *   other navigations        network, falling back to the cached ./index.html when offline
@@ -18,7 +20,7 @@
  *   everything else          cache-first from this version's shell cache (css, js, data,
  *                            icons, fonts), network fallback, successful responses stored
  */
-const VERSION = '95a30b029e';
+const VERSION = 'e7a1002fe6';
 const SHELL_CACHE = 'atlas-shell-' + VERSION;
 const TERRAIN_CACHE = 'atlas-terrain';
 const LEGACY_TERRAIN_PREFIX = 'atlas-terrain-';   // old per-version terrain caches
@@ -30,6 +32,8 @@ const PRECACHE = [
   './css/app.css',
   './css/fonts.css',
   './js/app.js',
+  './js/accent.js',
+  './js/vendor/qrcode.js',
   './data/na.json',
   './data/world.json',
   './manifest.webmanifest',
@@ -50,6 +54,8 @@ const abs = (path) => new URL(path, self.location).href;
 const SCOPE_URL = abs('./');
 const INDEX_URL = abs('./index.html');
 const TERRAIN_PREFIX = abs('./terrain/');
+const API_PREFIX = abs('./api/');
+const MAP_PREFIX = abs('./map/');
 
 // Only store complete, same-origin successes (never opaque, redirected-error or partial).
 const cacheable = (res) => res && res.ok && res.status === 200 && res.type === 'basic';
@@ -99,13 +105,14 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  if (url.href.startsWith(API_PREFIX)) return;   // sync API: straight to the network, any method
+  if (req.method !== 'GET') return;
 
   if (req.mode === 'navigate') {
     const page = url.origin + url.pathname;
-    if (page === SCOPE_URL || page === INDEX_URL) event.respondWith(appShell(req));
+    if (page === SCOPE_URL || page === INDEX_URL || page.startsWith(MAP_PREFIX)) event.respondWith(appShell(req));
     else event.respondWith(otherPage(req));
   } else if (url.href.startsWith(TERRAIN_PREFIX) && url.pathname.endsWith('.jpg')) {
     event.respondWith(cacheFirst(req, TERRAIN_CACHE));
@@ -124,9 +131,16 @@ async function cachedIndex() {
   );
 }
 
+// A host may answer ./index.html with a redirect to ./ (Cloudflare does). The browser refuses a
+// redirected response for a navigation, so hand out a plain copy of it instead.
+async function plain(res) {
+  if (!res || !res.redirected) return res;
+  return new Response(await res.blob(), { status: res.status, statusText: res.statusText, headers: res.headers });
+}
+
 async function appShell(req) {
   const cached = await cachedIndex();
-  return cached || fetch(req);
+  return cached ? plain(cached) : fetch(req);
 }
 
 async function otherPage(req) {
@@ -134,7 +148,7 @@ async function otherPage(req) {
     return await fetch(req);
   } catch (err) {
     const cached = await cachedIndex();
-    if (cached) return cached;
+    if (cached) return plain(cached);
     throw err;
   }
 }
