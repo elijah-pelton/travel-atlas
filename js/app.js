@@ -142,6 +142,43 @@
   })();
   $('#ios-hint-close').addEventListener('click', () => hideIosHint(true));
 
+  // Color for visited places, chosen from a small palette and remembered on this device
+  const ACCENT_KEY = 'travel-atlas:accent';
+  const accentBtn = $('#accent-btn'), accentPop = $('#accent-pop');
+  const swatches = [...accentPop.querySelectorAll('[data-accent]')];
+  const ACCENTS = swatches.map(b => b.dataset.accent);
+  function setAccent(name, remember) {
+    if (!ACCENTS.includes(name)) name = 'amber';
+    if (name === 'amber') document.documentElement.removeAttribute('data-accent');
+    else document.documentElement.setAttribute('data-accent', name);
+    swatches.forEach(b => { const on = b.dataset.accent === name; b.setAttribute('aria-checked', String(on)); b.tabIndex = on ? 0 : -1; });
+    if (remember) LS_SAFE.set(ACCENT_KEY, name);
+  }
+  function openAccent(open) {
+    accentPop.hidden = !open; accentBtn.setAttribute('aria-expanded', String(open));
+    if (open) {                                  // keep the palette on screen on narrow phones
+      accentPop.style.left = '0px';
+      const r = accentPop.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+      const shift = Math.max(8 - r.left, Math.min(0, vw - 8 - r.right));
+      accentPop.style.left = shift + 'px';
+    }
+    if (open) (swatches.find(b => b.getAttribute('aria-checked') === 'true') || swatches[0]).focus();
+  }
+  setAccent(LS_SAFE.get(ACCENT_KEY) || 'amber', false);
+  accentBtn.addEventListener('click', () => openAccent(accentPop.hidden));
+  swatches.forEach((b, i) => {
+    b.addEventListener('click', () => { setAccent(b.dataset.accent, true); openAccent(false); accentBtn.focus(); });
+    b.addEventListener('keydown', e => {
+      const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      const n = swatches[(i + step + swatches.length) % swatches.length];
+      setAccent(n.dataset.accent, true); n.focus();
+    });
+  });
+  document.addEventListener('click', e => { if (!accentPop.hidden && !e.target.closest('.accent')) openAccent(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !accentPop.hidden) { openAccent(false); accentBtn.focus(); } });
+
   // Service worker: offline support, and a quiet notice when a new version is ready
   const updateToast = $('#update-toast');
   let waitingWorker = null, reloadRequested = false;

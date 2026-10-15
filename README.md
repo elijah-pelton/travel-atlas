@@ -1,6 +1,6 @@
 # Travel Atlas
 
-Travel Atlas is a pair of maps for keeping track of where you have been. One map covers the United States and Canada. The other covers the world. Tap a place to mark it, and the counters and "Been there" lists update as you go. It works offline after the first load and can be installed like an app on a phone or computer.
+Travel Atlas is a pair of maps for keeping track of where you have been. One map covers the United States and Canada. The other covers the world. Tap a place to mark it, and the counters and "Been there" lists update as you go. The Color button lets you pick the color for places you've been (amber, coral, rose, violet, blue, teal or green); each device remembers its own choice. It works offline after the first load and can be installed like an app on a phone or computer.
 
 Live app: https://elijah-pelton.github.io/travel-atlas/
 

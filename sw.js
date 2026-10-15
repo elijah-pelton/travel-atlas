@@ -10,7 +10,7 @@
  *   everything else      cache-first (precached shell: css, js, data, icons, fonts),
  *                        network fallback, successful responses stored
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = 'atlas-shell-' + VERSION;
 const TERRAIN_CACHE = 'atlas-terrain-' + VERSION;
 const CURRENT = [SHELL_CACHE, TERRAIN_CACHE];

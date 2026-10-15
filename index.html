@@ -15,6 +15,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Atlas">
+<script>try { var a = localStorage.getItem('travel-atlas:accent'); if (a && a !== 'amber') document.documentElement.setAttribute('data-accent', a); } catch (e) {}</script>
 <link rel="stylesheet" href="./css/fonts.css">
 <link rel="stylesheet" href="./css/app.css">
 </head>
@@ -34,6 +35,18 @@
       <div class="seg" role="group" aria-label="Map style" id="style-seg">
         <button type="button" data-style="flat" aria-pressed="true"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="3" width="12" height="10" rx="1.5"/></svg>Flat colors</button>
         <button type="button" data-style="real" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M2 12.5 5.5 6l2.5 4 2-2.5 4 5z"/><circle cx="11" cy="4.5" r="1.4"/></svg>Real map</button>
+      </div>
+      <div class="accent">
+        <button type="button" class="btn accent-btn" id="accent-btn" aria-haspopup="true" aria-expanded="false" aria-controls="accent-pop" title="Choose the color for places you’ve been"><i class="sw" aria-hidden="true"></i>Color</button>
+        <div class="accent-pop" id="accent-pop" role="radiogroup" aria-label="Color for places you’ve been" hidden>
+          <button type="button" role="radio" data-accent="amber" aria-checked="true" aria-label="Amber" title="Amber"></button>
+          <button type="button" role="radio" data-accent="coral" aria-checked="false" aria-label="Coral" title="Coral"></button>
+          <button type="button" role="radio" data-accent="rose" aria-checked="false" aria-label="Rose" title="Rose"></button>
+          <button type="button" role="radio" data-accent="violet" aria-checked="false" aria-label="Violet" title="Violet"></button>
+          <button type="button" role="radio" data-accent="blue" aria-checked="false" aria-label="Blue" title="Blue"></button>
+          <button type="button" role="radio" data-accent="teal" aria-checked="false" aria-label="Teal" title="Teal"></button>
+          <button type="button" role="radio" data-accent="green" aria-checked="false" aria-label="Green" title="Green"></button>
+        </div>
       </div>
       <span class="status" id="status" data-state="connecting" title="">Loading…</span>
       <button type="button" class="btn" id="backup-btn">Backup</button>

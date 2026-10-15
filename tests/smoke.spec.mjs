@@ -534,3 +534,43 @@ test('14 update toast and iOS hint exist and are hidden in Chromium', async ({ p
   await expect(page.locator('#update-toast')).toBeHidden();
   await expect(page.locator('#ios-hint')).toBeHidden();
 });
+
+// ---------- 15: color picker ----------
+
+test('15 color picker recolors visited places, persists, and fits a phone screen', async ({ browser }, testInfo) => {
+  for (const scheme of ['light', 'dark']) {
+    const ctx = await browser.newContext({ baseURL: appRoot(testInfo), colorScheme: scheme, viewport: { width: 375, height: 812 } });
+    const page = await ctx.newPage();
+    const errs = watchErrors(page);
+    await openApp(page);
+    const fill = () => page.$eval('.legend i.on', e => getComputedStyle(e).backgroundColor);
+    const amber = await fill();
+    await page.click('#accent-btn');
+    await expect(page.locator('#accent-pop')).toBeVisible();
+    await expect(page.locator('#accent-pop [role="radio"]')).toHaveCount(7);
+    // the open palette stays on screen at phone width
+    const box = await page.locator('#accent-pop').boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    await page.click('#accent-pop [data-accent="teal"]');
+    await expect(page.locator('#accent-pop')).toBeHidden();
+    await expect(page.locator('html')).toHaveAttribute('data-accent', 'teal');
+    const teal = await fill();
+    expect(teal).not.toBe(amber);
+    await page.screenshot({ path: path.join(SHOTS, `palette-${scheme}-375.png`) });
+    await page.reload();
+    await page.waitForSelector('#frame-world svg.map');
+    expect(await fill()).toBe(teal);
+    await expect(page.locator('#accent-pop [data-accent="teal"]')).toHaveAttribute('aria-checked', 'true');
+    // back to the default removes the attribute
+    await page.click('#accent-btn');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#accent-pop')).toBeHidden();
+    await page.click('#accent-btn');
+    await page.click('#accent-pop [data-accent="amber"]');
+    await expect(page.locator('html')).not.toHaveAttribute('data-accent', /.+/);
+    expect(await fill()).toBe(amber);
+    expect(errs, errs.join('\n')).toEqual([]);
+    await ctx.close();
+  }
+});
