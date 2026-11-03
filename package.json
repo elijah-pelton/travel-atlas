@@ -8,6 +8,6 @@
     "check": "wrangler deploy --dry-run --outdir .wrangler/dry"
   },
   "devDependencies": {
-    "wrangler": "4.151.0"
+    "wrangler": "4.157.0"
   }
 }
